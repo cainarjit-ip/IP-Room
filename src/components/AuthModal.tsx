@@ -16,9 +16,9 @@ import {
   loginWithFacebook,
   registerWithEmail,
   loginWithEmail,
-  sendPasswordResetEmail,
   logoutUser,
-} from '../services/supabase';
+} from '../services/firebase';
+import { sendPasswordResetEmail } from '../services/supabase';
 
 interface AuthModalProps {
   language: Language;
