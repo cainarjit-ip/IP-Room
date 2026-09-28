@@ -1,0 +1,6 @@
+{
+  "name": "IP Room - Nepal's Student & Renter Room Marketplace",
+  "description": "Nepal's premier marketplace connecting students and renters with room owners across all 77 districts, featuring localized search, Khalti/eSewa booking, and digital tenancy contracts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

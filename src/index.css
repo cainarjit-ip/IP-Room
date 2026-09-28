@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+/* =========================================================
+   IP Room - Global Responsive CSS
+   Works with Tailwind CSS v4
+   Mobile: 320px–767px
+   Tablet: 768px–1023px
+   Desktop: 1024px+
+   ========================================================= */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  body {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    font-family: "Plus Jakarta Sans", "Mukta", system-ui, -apple-system, sans-serif;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  .font-display {
+    font-family: "Cabinet Grotesk", "Plus Jakarta Sans", sans-serif;
+  }
+
+  .font-nepali {
+    font-family: "Mukta", "Plus Jakarta Sans", sans-serif;
+  }
+
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  img,
+  video {
+    height: auto;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    max-width: 100%;
+    font: inherit;
+  }
+}
+
+/* Flex/grid children must be allowed to shrink. */
+.flex > *,
+.grid > * {
+  min-width: 0;
+}
+
+/* Prevent long content from increasing page width. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+a,
+span {
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   Mobile
+   ========================================================= */
+
+@media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  main,
+  section,
+  article,
+  aside,
+  footer,
+  nav,
+  header {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  /* Prevent common fixed-width elements from overflowing. */
+  img,
+  picture,
+  video,
+  canvas,
+  iframe,
+  table {
+    max-width: 100%;
+  }
+
+  /* Keep large headings inside the mobile viewport. */
+  h1,
+  h2,
+  h3 {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* =========================================================
+   Tablet
+   ========================================================= */
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  main,
+  section,
+  article,
+  aside,
+  footer,
+  nav,
+  header {
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+
+/* =========================================================
+   Desktop
+   ========================================================= */
+
+@media (min-width: 1024px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+}
+
+/* =========================================================
+   Custom subtle scrollbar
+   ========================================================= */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

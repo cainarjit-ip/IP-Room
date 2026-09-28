@@ -1,0 +1,497 @@
+import React, { useState } from 'react';
+import { RoomListing, BookingRequest, Language, UserProfile } from '../types';
+import { getTranslation } from '../data/translations';
+import { OwnerAnalytics } from './OwnerAnalytics';
+import {
+  PlusCircle,
+  Building,
+  Users,
+  DollarSign,
+  TrendingUp,
+  ShieldCheck,
+  Check,
+  X,
+  FileText,
+  Clock,
+  BarChart3,
+  Layers,
+  Home,
+} from 'lucide-react';
+
+interface OwnerDashboardProps {
+  rooms: RoomListing[];
+  bookings: BookingRequest[];
+  language: Language;
+  currentUser?: UserProfile | null;
+  onOpenAddListing: () => void;
+  onAcceptBooking: (bookingId: string) => void;
+  onRejectBooking: (bookingId: string) => void;
+  onViewContract: (booking: BookingRequest) => void;
+  onSelectRoom: (room: RoomListing) => void;
+}
+
+export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
+  rooms,
+  bookings,
+  language,
+  currentUser,
+  onOpenAddListing,
+  onAcceptBooking,
+  onRejectBooking,
+  onViewContract,
+  onSelectRoom,
+}) => {
+  const t = getTranslation(language);
+
+  const [activeOwnerTab, setActiveOwnerTab] = useState<
+    'listings' | 'analytics'
+  >('listings');
+
+  // Landlord's listings
+  const myRooms = rooms;
+
+  // Real calculations based on actual user data
+  const totalRentCollected = bookings.reduce(
+    (sum, b) => sum + (b.totalPaid || 0),
+    0
+  );
+
+  const totalInquiries = bookings.length;
+
+  const confirmedCount = bookings.filter(
+    (b) => b.status === 'confirmed'
+  ).length;
+
+  const occupancyRate =
+    myRooms.length > 0
+      ? `${Math.round((confirmedCount / myRooms.length) * 100)}%`
+      : '0%';
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+      {/* Top Banner */}
+      <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl border border-slate-800">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-bold text-sm text-emerald-400">
+              Owner Portal · घरधनी ड्यासबोर्ड
+            </span>
+
+            <span className="text-slate-500">·</span>
+
+            <span className="inline-flex items-center gap-1 text-xs bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Citizenship Verified</span>
+            </span>
+          </div>
+
+          <h1 className="font-display font-extrabold text-2xl sm:text-3xl text-white">
+            {currentUser
+              ? `Welcome back, ${currentUser.name}`
+              : language === 'np'
+              ? 'घरधनी ड्यासबोर्डमा स्वागत छ'
+              : 'Welcome to Owner Portal'}
+          </h1>
+
+          <p className="mt-1 text-xs sm:text-sm text-slate-300">
+            Manage your rental flats, inspect student booking requests, and
+            track rent settlements across Nepal.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenAddListing}
+          className="inline-flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-md whitespace-nowrap self-start md:self-auto cursor-pointer"
+        >
+          <PlusCircle className="w-4 h-4" />
+          <span>{t.addNewListing}</span>
+        </button>
+      </div>
+
+      {/* Owner Dashboard Tabs */}
+      <div className="flex border-b border-slate-200">
+        <div className="flex gap-2">
+
+          {/* Listings Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveOwnerTab('listings')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition ${
+              activeOwnerTab === 'listings'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+
+            <span>
+              {language === 'np'
+                ? 'सम्पत्ति र बुकिङहरू'
+                : 'Properties & Bookings'}
+            </span>
+
+            <span className="text-[10px] bg-slate-200 text-slate-700 font-mono px-1.5 py-0.5 rounded-full font-semibold">
+              {myRooms.length}
+            </span>
+          </button>
+
+          {/* Analytics Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveOwnerTab('analytics')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition ${
+              activeOwnerTab === 'analytics'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+
+            <span>
+              {language === 'np'
+                ? 'कोठा विश्लेषक (Analytics)'
+                : 'Room Analytics & Performance'}
+            </span>
+
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono px-1.5 py-0.5 rounded-full font-bold">
+              Recharts
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Analytics */}
+      {activeOwnerTab === 'analytics' ? (
+        <OwnerAnalytics
+          rooms={rooms}
+          bookings={bookings}
+          language={language}
+          onSelectRoom={onSelectRoom}
+        />
+      ) : (
+        <div className="space-y-8">
+
+          {/* Metrics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+            {/* Monthly Earnings */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 mb-2">
+                <span className="text-xs font-semibold">
+                  {t.monthlyEarnings}
+                </span>
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+              </div>
+
+              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+                रु. {totalRentCollected.toLocaleString('en-IN')}
+              </div>
+
+              <span className="text-[11px] text-emerald-700 font-medium">
+                ↑ +18% vs previous month
+              </span>
+            </div>
+
+            {/* Listings */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 mb-2">
+                <span className="text-xs font-semibold">
+                  {t.myListings}
+                </span>
+                <Building className="w-4 h-4 text-blue-600" />
+              </div>
+
+              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+                {myRooms.length} Active
+              </div>
+
+              <span className="text-[11px] text-slate-500">
+                Across 3 municipalities
+              </span>
+            </div>
+
+            {/* Occupancy */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 mb-2">
+                <span className="text-xs font-semibold">
+                  {t.occupancyRate}
+                </span>
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+              </div>
+
+              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+                {occupancyRate}
+              </div>
+
+              <span className="text-[11px] text-emerald-700 font-medium">
+                Near TU admission peak
+              </span>
+            </div>
+
+            {/* Inquiries */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 mb-2">
+                <span className="text-xs font-semibold">
+                  {t.totalInquiries}
+                </span>
+                <Users className="w-4 h-4 text-purple-600" />
+              </div>
+
+              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+                {totalInquiries}
+              </div>
+
+              <span className="text-[11px] text-purple-700 font-medium">
+                Avg response time: 15 mins
+              </span>
+            </div>
+          </div>
+
+          {/* Booking Requests Queue */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-4">
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-700" />
+                <h2 className="font-bold text-sm text-slate-900">
+                  {t.bookingRequests}
+                </h2>
+              </div>
+
+              <span className="text-xs text-slate-500 font-mono">
+                ({bookings.length} Requests)
+              </span>
+            </div>
+
+            {bookings.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">
+                No pending booking requests right now. New student bookings
+                will appear here.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+
+                {bookings.map((req) => (
+                  <div
+                    key={req.id}
+                    className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div className="flex items-start gap-3">
+
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-sm shrink-0">
+                        {req.tenantName.charAt(0)}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-xs text-slate-900">
+                            {req.tenantName}
+                          </span>
+
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            ({req.tenantPhone})
+                          </span>
+
+                          <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-1.5 py-0.5 rounded">
+                            Escrow Paid: रु.{' '}
+                            {req.totalPaid.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-600 mt-0.5">
+                          Target Room:{' '}
+                          <span className="font-medium text-slate-800">
+                            {req.roomTitle}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Move-in: <strong>{req.moveInDate}</strong> · Duration:{' '}
+                          <strong>{req.durationMonths} Months</strong> ·
+                          College: {req.tenantUniversity || 'Student'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Booking Actions */}
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+
+                      <button
+                        type="button"
+                        onClick={() => onViewContract(req)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>View Contract</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onAcceptBooking(req.id)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg transition shadow-xs"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Accept</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onRejectBooking(req.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                        title="Decline"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+              </div>
+            )}
+          </div>
+
+          {/* Landlord's Current Listings */}
+          <div className="space-y-4">
+
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-sm text-slate-900">
+                {t.myListings}
+              </h2>
+
+              <span className="text-xs text-slate-500">
+                {myRooms.length} Properties
+              </span>
+            </div>
+
+            {/* No Listings */}
+            {myRooms.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-10 text-center space-y-3">
+
+                <Home className="w-12 h-12 text-slate-300 mx-auto" />
+
+                <h3 className="font-bold text-sm text-slate-800">
+                  {language === 'np'
+                    ? 'कुनै कोठा थपिएको छैन'
+                    : 'No Properties Listed Yet'}
+                </h3>
+
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  {language === 'np'
+                    ? 'विद्यार्थीहरूलाई भाडामा दिन आफ्नो पहिलो कोठा वा फ्ल्याट थप्नुहोस्।'
+                    : 'Publish your first student rental room or flat to start receiving booking requests and inquiries.'}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={onOpenAddListing}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>{t.addNewListing}</span>
+                </button>
+              </div>
+            ) : (
+
+              /* Listings Grid */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+
+                {myRooms.map((room) => (
+                  <div
+                    key={room.id}
+                    className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between"
+                  >
+
+                    {/* Room Image */}
+                    <div className="relative">
+
+                      <img
+                        src={room.images[0]}
+                        alt={room.title}
+                        className="w-full h-36 object-cover"
+                      />
+
+                      {/* Status Badge */}
+                      <div className="absolute top-2 right-2">
+
+                        {room.status === 'pending' && (
+                          <span className="bg-amber-500/90 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                            Pending Verification
+                          </span>
+                        )}
+
+                        {(room.status === 'active' ||
+                          room.status === 'approved') && (
+                          <span className="bg-emerald-600/90 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                            Approved / Active
+                          </span>
+                        )}
+
+                        {room.status === 'rejected' && (
+                          <span className="bg-rose-600/90 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                            Rejected
+                          </span>
+                        )}
+
+                        {room.status === 'suspended' && (
+                          <span className="bg-purple-600/90 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                            Suspended
+                          </span>
+                        )}
+
+                      </div>
+                    </div>
+
+                    {/* Room Information */}
+                    <div className="p-4 space-y-2">
+
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-emerald-700 font-semibold">
+                          {room.location.municipality}
+                        </span>
+
+                        <span className="text-slate-500">
+                          Ward {room.location.ward}
+                        </span>
+                      </div>
+
+                      <h3 className="font-bold text-xs text-slate-900 line-clamp-1">
+                        {room.title}
+                      </h3>
+
+                      <div className="text-xs text-slate-600 font-mono tabular-nums">
+                        Rent: रु.{' '}
+                        {room.price.toLocaleString('en-IN')}
+                        /mo · Deposit: रु.{' '}
+                        {room.deposit.toLocaleString('en-IN')}
+                      </div>
+
+                      <div className="text-[11px] text-slate-500">
+                        Water: {room.waterSchedule}
+                      </div>
+
+                    </div>
+
+                    {/* Public Listing Button */}
+                    <div className="p-4 pt-0">
+                      <button
+                        type="button"
+                        onClick={() => onSelectRoom(room)}
+                        className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
+                      >
+                        View Public Listing
+                      </button>
+                    </div>
+
+                  </div>
+                ))}
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

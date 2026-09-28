@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "RoomListing": {
+      "title": "RoomListing",
+      "description": "Room listing entity in Nepal student and renter marketplace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "titleNp": { "type": "string" },
+        "price": { "type": "number" },
+        "deposit": { "type": "number" },
+        "roomType": { "type": "string" },
+        "occupancyPreference": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending", "active", "approved", "rejected", "suspended", "unpublished"]
+        },
+        "rejectionReason": { "type": "string" },
+        "moderatedAt": { "type": "string" },
+        "moderatedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "price", "roomType", "status"]
+    },
+    "ModerationLog": {
+      "title": "ModerationLog",
+      "description": "Audit trail log of actions taken by Admin Moderator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "listingId": { "type": "string" },
+        "listingTitle": { "type": "string" },
+        "action": {
+          "type": "string",
+          "enum": ["approved", "rejected", "suspended", "unpublished", "restored", "deleted"]
+        },
+        "previousStatus": { "type": "string" },
+        "newStatus": { "type": "string" },
+        "moderatorId": { "type": "string" },
+        "moderatorName": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "listingId", "action", "newStatus", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": "RoomListing",
+      "description": "Public and moderation room listing documents"
+    },
+    "/moderation_logs/{logId}": {
+      "schema": "ModerationLog",
+      "description": "Moderator audit history events"
+    }
+  }
+}
