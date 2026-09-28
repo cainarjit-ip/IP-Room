@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserProfile, UserRole, Language } from '../types';
 import { getTranslation } from '../data/translations';
 import {
@@ -8,7 +8,6 @@ import {
   User,
   Phone,
   School,
-  ShieldCheck,
   CheckCircle2,
   ArrowRight,
 } from 'lucide-react';
@@ -17,8 +16,9 @@ import {
   loginWithFacebook,
   registerWithEmail,
   loginWithEmail,
-} from '../services/firebase';
-import { sendPasswordResetEmail } from '../services/supabase';
+  sendPasswordResetEmail,
+  logoutUser,
+} from '../services/supabase';
 
 interface AuthModalProps {
   language: Language;
@@ -27,6 +27,10 @@ interface AuthModalProps {
   initialMode?: 'login' | 'signup';
   initialRole?: UserRole;
 }
+
+// Nepal mobile numbers: optional +977, then 97/98 + 8 digits
+const NEPAL_PHONE_REGEX = /^(\+977)?9[78]\d{8}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   language,
@@ -37,7 +41,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const t = getTranslation(language);
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
-  const [role, setRole] = useState<UserRole>(initialRole);
+  // Admin role is only allowed in login mode
+  const [role, setRole] = useState<UserRole>(
+    initialMode === 'signup' && initialRole === 'admin' ? 'renter' : initialRole
+  );
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
@@ -51,12 +58,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loadingProvider, setLoadingProvider] = useState<'google' | 'facebook' | 'email' | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Handle Google Sign-in via Supabase OAuth redirect
+  // Close modal with Escape key
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  // Social sign-in must never carry the admin role (client-side role can't be trusted)
+  const socialRole: UserRole = role === 'admin' ? 'renter' : role;
+
   const handleGoogleAuth = async () => {
     setLoadingProvider('google');
     setErrorMsg('');
     try {
-      await loginWithGoogle(role);
+      await loginWithGoogle(socialRole);
+      // On success the OAuth redirect leaves the page, so keep the spinner
     } catch (err: any) {
       console.warn('Google sign-in error:', err);
       setErrorMsg(err?.message || 'Google sign-in could not be completed. Please try again.');
@@ -64,12 +83,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Handle Facebook Sign-in via Supabase OAuth redirect
   const handleFacebookAuth = async () => {
     setLoadingProvider('facebook');
     setErrorMsg('');
     try {
-      await loginWithFacebook(role);
+      await loginWithFacebook(socialRole);
     } catch (err: any) {
       console.warn('Facebook sign-in error:', err);
       setErrorMsg(err?.message || 'Facebook sign-in could not be completed. Please try again.');
@@ -77,43 +95,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Handle Email Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loadingProvider !== null) return;
     setLoadingProvider('email');
     setErrorMsg('');
 
+    let succeeded = false;
+
     try {
+      // ---- Forgot password ----
       if (isForgotPassword) {
-        if (!email.trim()) {
-          setErrorMsg('Please enter your email address to receive reset instructions.');
-          setLoadingProvider(null);
+        if (!EMAIL_REGEX.test(email.trim())) {
+          setErrorMsg('Please enter a valid email address to receive reset instructions.');
           return;
         }
         const res = await sendPasswordResetEmail(email.trim());
-        if (res.error) {
+        if (res?.error) {
           setErrorMsg(res.error);
         } else {
           setResetEmailSent(true);
         }
-        setLoadingProvider(null);
         return;
       }
 
+      // ---- Sign up ----
       if (mode === 'signup') {
         if (!name.trim()) {
           setErrorMsg('Please enter your full legal name.');
-          setLoadingProvider(null);
           return;
         }
-        if (!email.trim() || !password) {
-          setErrorMsg('Please enter a valid email and password.');
-          setLoadingProvider(null);
+        if (!EMAIL_REGEX.test(email.trim())) {
+          setErrorMsg('Please enter a valid email address.');
           return;
         }
         if (password.length < 6) {
           setErrorMsg('Password must be at least 6 characters long.');
-          setLoadingProvider(null);
+          return;
+        }
+        const cleanPhone = phone.replace(/[\s-]/g, '');
+        if (!NEPAL_PHONE_REGEX.test(cleanPhone)) {
+          setErrorMsg('Please enter a valid Nepal mobile number, e.g. +977 98XXXXXXXX.');
           return;
         }
 
@@ -122,41 +144,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           password,
           name.trim(),
           role,
-          phone.trim(),
-          role === 'renter' ? university : undefined
+          cleanPhone,
+          role === 'renter' ? university.trim() : undefined
         );
+        succeeded = true;
         onSuccess(profile);
         onClose();
-      } else {
-        // Mode === 'login'
-        if (!email.trim() || !password) {
-          setErrorMsg('Please enter both email and password.');
-          setLoadingProvider(null);
-          return;
-        }
-
-        const profile = await loginWithEmail(email.trim(), password);
-
-        // If the user explicitly chose Admin sign-in, verify that their account has admin role
-        if (role === 'admin' && profile.role !== 'admin') {
-          setErrorMsg('This account does not have administrator privileges.');
-          setLoadingProvider(null);
-          return;
-        }
-
-        onSuccess(profile);
-        onClose();
+        return;
       }
+
+      // ---- Login ----
+      if (!email.trim() || !password) {
+        setErrorMsg('Please enter both email and password.');
+        return;
+      }
+
+      const profile = await loginWithEmail(email.trim(), password);
+
+      // If the user chose Admin sign-in, verify the account really has the admin role.
+      // NOTE: this is only a UI check. Real admin access must be enforced on the server
+      // (Supabase RLS policies on the profiles table).
+      if (role === 'admin' && profile.role !== 'admin') {
+        await logoutUser(); // don't leave a non-admin session open
+        setErrorMsg('This account does not have administrator privileges.');
+        return;
+      }
+
+      succeeded = true;
+      onSuccess(profile);
+      onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Authentication failed. Please verify credentials.');
     } finally {
-      setLoadingProvider(null);
+      // Don't update state if the modal is closing after success
+      if (!succeeded) setLoadingProvider(null);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-      <div className="relative bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+      onMouseDown={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]"
+      >
         {/* Header */}
         <div className="p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
           <div>
@@ -177,15 +213,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Body Container */}
+        {/* Body */}
         <div className="p-5 overflow-y-auto space-y-4">
-          {/* Mode Switch Tabs */}
+          {/* Mode tabs */}
           {!isForgotPassword && (
             <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-bold">
               <button
@@ -196,7 +233,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 }}
                 className={`py-2 rounded-lg transition-all ${
                   mode === 'login'
-                    ? 'bg-white text-slate-900 shadow-xs'
+                    ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -211,7 +248,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 }}
                 className={`py-2 rounded-lg transition-all ${
                   mode === 'signup'
-                    ? 'bg-white text-slate-900 shadow-xs'
+                    ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -220,8 +257,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* Social OAuth Buttons */}
-          {!isForgotPassword && mode === 'login' && (
+          {/* Social buttons (hidden for admin, since admin uses email login only) */}
+          {!isForgotPassword && mode === 'login' && role !== 'admin' && (
             <div className="space-y-2">
               <button
                 type="button"
@@ -281,7 +318,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           {/* Feedback messages */}
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+            <div
+              role="alert"
+              className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs"
+            >
               {errorMsg}
             </div>
           )}
@@ -292,73 +332,77 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div>
                 <p className="font-bold">Password Reset Link Sent!</p>
                 <p className="text-[11px] mt-0.5">
-                  Check your inbox for a password reset email from Supabase.
+                  Check your inbox for the password reset email.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Role Selector */}
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1.5 text-xs">
-              Select Role:
-            </label>
-            <div className={`grid ${mode === 'login' ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-              <button
-                type="button"
-                onClick={() => setRole('renter')}
-                className={`py-2 px-3 text-xs font-semibold rounded-lg border text-left transition flex items-center justify-between ${
-                  role === 'renter'
-                    ? 'border-emerald-600 bg-emerald-50/70 text-emerald-900 ring-1 ring-emerald-600'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                }`}
-              >
-                <span>🎓 {t.roleStudent}</span>
-                {role === 'renter' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setRole('owner')}
-                className={`py-2 px-3 text-xs font-semibold rounded-lg border text-left transition flex items-center justify-between ${
-                  role === 'owner'
-                    ? 'border-blue-600 bg-blue-50/70 text-blue-900 ring-1 ring-blue-600'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                }`}
-              >
-                <span>🏠 {t.roleOwner}</span>
-                {role === 'owner' && <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />}
-              </button>
-
-              {mode === 'login' && (
+          {/* Role selector (not needed for password reset) */}
+          {!isForgotPassword && (
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1.5 text-xs">
+                Select Role:
+              </label>
+              <div className={`grid ${mode === 'login' ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                 <button
                   type="button"
-                  onClick={() => setRole('admin')}
+                  onClick={() => setRole('renter')}
                   className={`py-2 px-3 text-xs font-semibold rounded-lg border text-left transition flex items-center justify-between ${
-                    role === 'admin'
-                      ? 'border-purple-600 bg-purple-50/70 text-purple-900 ring-1 ring-purple-600'
+                    role === 'renter'
+                      ? 'border-emerald-600 bg-emerald-50/70 text-emerald-900 ring-1 ring-emerald-600'
                       : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                   }`}
                 >
-                  <span>🛡️ Admin</span>
-                  {role === 'admin' && <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />}
+                  <span>🎓 {t.roleStudent}</span>
+                  {role === 'renter' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
                 </button>
-              )}
-            </div>
-          </div>
 
-          {/* Email / Password Form */}
+                <button
+                  type="button"
+                  onClick={() => setRole('owner')}
+                  className={`py-2 px-3 text-xs font-semibold rounded-lg border text-left transition flex items-center justify-between ${
+                    role === 'owner'
+                      ? 'border-blue-600 bg-blue-50/70 text-blue-900 ring-1 ring-blue-600'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <span>🏠 {t.roleOwner}</span>
+                  {role === 'owner' && <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />}
+                </button>
+
+                {mode === 'login' && (
+                  <button
+                    type="button"
+                    onClick={() => setRole('admin')}
+                    className={`py-2 px-3 text-xs font-semibold rounded-lg border text-left transition flex items-center justify-between ${
+                      role === 'admin'
+                        ? 'border-purple-600 bg-purple-50/70 text-purple-900 ring-1 ring-purple-600'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span>🛡️ Admin</span>
+                    {role === 'admin' && <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Email / Password form */}
           <form onSubmit={handleSubmit} className="space-y-3">
-            {mode === 'signup' && (
+            {mode === 'signup' && !isForgotPassword && (
               <div>
-                <label className="font-semibold text-slate-700 block mb-1 text-xs">
+                <label htmlFor="auth-name" className="font-semibold text-slate-700 block mb-1 text-xs">
                   Full Legal Name
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="auth-name"
                     type="text"
                     required
+                    autoComplete="name"
                     placeholder="e.g. Ramesh Shrestha"
                     value={name}
                     onChange={e => setName(e.target.value)}
@@ -369,14 +413,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
 
             <div>
-              <label className="font-semibold text-slate-700 block mb-1 text-xs">
+              <label htmlFor="auth-email" className="font-semibold text-slate-700 block mb-1 text-xs">
                 Email Address
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
+                  id="auth-email"
                   type="email"
                   required
+                  autoComplete="email"
                   placeholder="e.g. user@gmail.com"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
@@ -388,7 +434,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {!isForgotPassword && (
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="font-semibold text-slate-700 text-xs">
+                  <label htmlFor="auth-password" className="font-semibold text-slate-700 text-xs">
                     Password
                   </label>
                   {mode === 'login' && (
@@ -396,6 +442,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       type="button"
                       onClick={() => {
                         setIsForgotPassword(true);
+                        setResetEmailSent(false);
                         setErrorMsg('');
                       }}
                       className="text-[11px] text-emerald-700 hover:underline"
@@ -407,8 +454,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="auth-password"
                     type="password"
                     required
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                     placeholder="••••••••"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
@@ -418,16 +467,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            {mode === 'signup' && (
+            {mode === 'signup' && !isForgotPassword && (
               <div>
-                <label className="font-semibold text-slate-700 block mb-1 text-xs">
+                <label htmlFor="auth-phone" className="font-semibold text-slate-700 block mb-1 text-xs">
                   Mobile Number (Nepal)
                 </label>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="auth-phone"
                     type="tel"
                     required
+                    autoComplete="tel"
                     placeholder="+977 98XXXXXXXX"
                     value={phone}
                     onChange={e => setPhone(e.target.value)}
@@ -437,14 +488,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            {mode === 'signup' && role === 'renter' && (
+            {mode === 'signup' && role === 'renter' && !isForgotPassword && (
               <div>
-                <label className="font-semibold text-slate-700 block mb-1 text-xs">
+                <label htmlFor="auth-university" className="font-semibold text-slate-700 block mb-1 text-xs">
                   College / University (Campus)
                 </label>
                 <div className="relative">
                   <School className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="auth-university"
                     type="text"
                     placeholder="e.g. Pulchowk Engineering Campus, TU"
                     value={university}
@@ -469,7 +521,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             )}
 
-            {/* Submit Button */}
+            {/* Submit */}
             <button
               type="submit"
               disabled={loadingProvider !== null}
@@ -478,7 +530,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {loadingProvider === 'email' ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Authenticating...</span>
+                  <span>Please wait...</span>
                 </div>
               ) : isForgotPassword ? (
                 <>
