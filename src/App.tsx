@@ -54,6 +54,7 @@ import {
   getCurrentUserProfile,
   onAuthStateChange,
   updateDisputeStatusInSupabase,
+  fetchDisputesFromSupabase,
 } from './services/supabase';
 import {
   AppNotification,

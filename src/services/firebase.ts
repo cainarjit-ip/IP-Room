@@ -1,5 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import {
   UserProfile,
@@ -10,15 +15,17 @@ import {
   ListingStatus,
 } from '../types';
 
-// Load config for optional Firebase FCM (push notifications) compatibility ONLY.
+// Load config for Firebase
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Supabase client and service methods
 import {
   supabase,
   isValidUUID,
+  stringToUUID,
   saveProfileToSupabase,
   getProfileFromSupabase,
+  getProfileByEmailFromSupabase,
   subscribeToProfileInSupabase,
   fetchRoomsFromSupabase,
   saveRoomToSupabase,
@@ -97,18 +104,88 @@ export const subscribeToUserProfile = (
 };
 
 /**
- * Sign In with Google via Supabase OAuth (Redirect flow)
+ * Sign In with Google via Firebase Auth (Popup flow - optimal for iframes and Cloud Run)
+ * Creates or retrieves user profile with selected role ('renter' or 'owner', or 'admin' for cainarjit@gmail.com).
  */
-export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise<void> => {
-  localStorage.setItem('iproom_pending_oauth_role', defaultRole);
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin,
-    },
-  });
-  if (error) {
-    throw new Error(error.message || 'Google sign-in could not be started.');
+export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise<UserProfile> => {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const userCredential = await signInWithPopup(auth, provider);
+    const user = userCredential.user;
+
+    const email = (user.email || '').trim().toLowerCase();
+    const isSuperAdmin = email === 'cainarjit@gmail.com';
+    const assignedRole: UserRole = isSuperAdmin ? 'admin' : (defaultRole === 'admin' ? 'renter' : defaultRole);
+
+    // Compute deterministic valid RFC 4122 UUID from user's Firebase UID or email
+    const userUUID = stringToUUID(user.uid || email);
+
+    // Check if profile already exists in Supabase
+    let existingProfile = await getProfileFromSupabase(userUUID);
+    if (!existingProfile && email) {
+      existingProfile = await getProfileByEmailFromSupabase(email);
+    }
+
+    if (existingProfile) {
+      const updatedProfile: UserProfile = {
+        ...existingProfile,
+        name: existingProfile.name || user.displayName || email.split('@')[0] || 'IP Room User',
+        avatar:
+          existingProfile.avatar ||
+          user.photoURL ||
+          `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName || 'User')}`,
+        role: isSuperAdmin ? 'admin' : existingProfile.role,
+        verified: isSuperAdmin ? true : existingProfile.verified,
+      };
+
+      try {
+        await saveProfileToSupabase(updatedProfile);
+      } catch (err) {
+        console.warn('Profile sync notice:', err);
+      }
+
+      saveUserSession(updatedProfile);
+      return updatedProfile;
+    }
+
+    // Create fresh profile with requested role (renter or owner)
+    const displayName = user.displayName || (email ? email.split('@')[0] : 'IP Room User');
+    const newProfile: UserProfile = {
+      id: userUUID,
+      name: displayName,
+      email: user.email || '',
+      phone: user.phoneNumber || '+977 98XXXXXXXX',
+      role: assignedRole,
+      avatar:
+        user.photoURL ||
+        `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}`,
+      verified: isSuperAdmin || assignedRole === 'renter',
+      citizenshipVerified: assignedRole === 'owner',
+      university: assignedRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+      studentIdVerified: assignedRole === 'renter',
+    };
+
+    try {
+      await saveProfileToSupabase(newProfile);
+    } catch (err) {
+      console.warn('Profile save notice:', err);
+    }
+
+    saveUserSession(newProfile);
+    return newProfile;
+  } catch (error: any) {
+    console.error('Firebase Google Sign-In error:', error);
+    if (error?.code === 'auth/popup-closed-by-user') {
+      throw new Error('Google sign-in was cancelled. Please try again.');
+    }
+    if (error?.code === 'auth/popup-blocked') {
+      throw new Error('Pop-up was blocked by browser. Please allow popups for this site and try again.');
+    }
+    if (error?.code === 'auth/cancelled-popup-request') {
+      throw new Error('Another sign-in window is already open. Please complete or close it.');
+    }
+    throw new Error(error?.message || 'Google sign-in could not be completed. Please try again.');
   }
 };
 
@@ -130,43 +207,67 @@ export const loginWithFacebook = async (defaultRole: UserRole = 'renter'): Promi
 
 /**
  * Called once on app startup after an OAuth redirect (Google/Facebook) completes.
- * Uses the real Supabase Auth session user ID.
+ * Uses the real Supabase Auth session user ID and synthesizes profile if not yet created.
  */
 export const ensureProfileAfterOAuthRedirect = async (): Promise<UserProfile | null> => {
-  const { data } = await supabase.auth.getUser();
-  const user = data?.user;
-  if (!user || !isValidUUID(user.id)) return null;
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.user || !isValidUUID(session.user.id)) {
+      return null;
+    }
 
-  const existing = await getProfileFromSupabase(user.id);
-  if (existing) {
-    saveUserSession(existing);
-    return existing;
+    const user = session.user;
+    const isSuperAdmin = (user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
+    let existing = await getProfileFromSupabase(user.id);
+
+    if (existing) {
+      if (isSuperAdmin && existing.role !== 'admin') {
+        existing = { ...existing, role: 'admin', verified: true };
+        await saveProfileToSupabase(existing);
+      }
+      saveUserSession(existing);
+
+      // Clean up OAuth hash/code from address bar
+      if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+      return existing;
+    }
+
+    const pendingRole = (localStorage.getItem('iproom_pending_oauth_role') as UserRole) || (isSuperAdmin ? 'admin' : 'renter');
+    localStorage.removeItem('iproom_pending_oauth_role');
+
+    const meta: any = user.user_metadata || {};
+    const fullName = meta.full_name || meta.name || user.email?.split('@')[0] || 'IP Room User';
+    const profile: UserProfile = {
+      id: user.id,
+      name: fullName,
+      email: user.email || '',
+      phone: meta.phone || '+977 98XXXXXXXX',
+      role: isSuperAdmin ? 'admin' : pendingRole,
+      avatar:
+        meta.avatar_url ||
+        meta.picture ||
+        `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+      verified: isSuperAdmin || pendingRole === 'renter',
+      citizenshipVerified: pendingRole === 'owner',
+      university: pendingRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+      studentIdVerified: pendingRole === 'renter',
+    };
+
+    await saveProfileToSupabase(profile);
+    saveUserSession(profile);
+
+    // Clean up OAuth hash/code from address bar
+    if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    return profile;
+  } catch (err) {
+    console.warn('Error during ensureProfileAfterOAuthRedirect:', err);
+    return null;
   }
-
-  const pendingRole = (localStorage.getItem('iproom_pending_oauth_role') as UserRole) || 'renter';
-  localStorage.removeItem('iproom_pending_oauth_role');
-
-  const meta: any = user.user_metadata || {};
-  const fullName = meta.full_name || meta.name || 'IP Room User';
-  const profile: UserProfile = {
-    id: user.id,
-    name: fullName,
-    email: user.email || '',
-    phone: meta.phone || '+977 98XXXXXXXX',
-    role: pendingRole,
-    avatar:
-      meta.avatar_url ||
-      meta.picture ||
-      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
-    verified: true,
-    citizenshipVerified: pendingRole === 'owner',
-    university: pendingRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
-    studentIdVerified: pendingRole === 'renter',
-  };
-
-  await saveProfileToSupabase(profile);
-  saveUserSession(profile);
-  return profile;
 };
 
 /**
@@ -236,6 +337,8 @@ export const loginWithEmail = async (email: string, pass: string): Promise<UserP
   }
 
   if (data?.user) {
+    const isCainarjitAdmin = email.trim().toLowerCase() === 'cainarjit@gmail.com';
+
     // 1. First attempt to read profile by user UUID
     let stored = await getProfileFromSupabase(data.user.id);
     if (!stored) {
@@ -245,12 +348,16 @@ export const loginWithEmail = async (email: string, pass: string): Promise<UserP
     }
 
     if (stored) {
+      // Enforce admin privileges for designated admin
+      if (isCainarjitAdmin && stored.role !== 'admin') {
+        stored = { ...stored, role: 'admin', verified: true };
+        await saveProfileToSupabase(stored);
+      }
       saveUserSession(stored);
       return stored;
     }
 
     // Determine role (admin for designated admin account, or user_metadata, or renter)
-    const isCainarjitAdmin = email.trim().toLowerCase() === 'cainarjit@gmail.com';
     const resolvedRole: UserRole = isCainarjitAdmin
       ? 'admin'
       : ((data.user.user_metadata?.role as UserRole) || 'renter');
@@ -276,9 +383,14 @@ export const loginWithEmail = async (email: string, pass: string): Promise<UserP
 };
 
 /**
- * Logout user from Supabase
+ * Logout user from Firebase and Supabase
  */
 export const logoutUser = async (): Promise<void> => {
+  try {
+    await firebaseSignOut(auth);
+  } catch (e) {
+    console.warn('Firebase signOut notice:', e);
+  }
   try {
     await supabase.auth.signOut();
   } catch (e) {

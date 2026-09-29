@@ -7,11 +7,11 @@ import {
   ListingStatus,
   DisputeTicket,
 } from '../types';
-import { supabase, isValidUUID, getAuthenticatedSessionUser } from '../lib/supabase';
+import { supabase, isValidUUID, stringToUUID, getAuthenticatedSessionUser } from '../lib/supabase';
 
 // Re-export all modular Supabase services
 export * from './supabase/index';
-export { supabase, isValidUUID, getAuthenticatedSessionUser };
+export { supabase, isValidUUID, stringToUUID, getAuthenticatedSessionUser };
 
 export const SUPABASE_URL =
   (import.meta.env.VITE_SUPABASE_URL as string) ||
@@ -355,6 +355,26 @@ export const getProfileFromSupabase = async (id: string | null | undefined): Pro
     return data ? mapProfileFromRow(data) : null;
   } catch (err: any) {
     console.warn('Supabase getProfile exception:', err?.message);
+    return null;
+  }
+};
+
+export const getProfileByEmailFromSupabase = async (email: string | null | undefined): Promise<UserProfile | null> => {
+  if (!email || typeof email !== 'string') return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .ilike('email', email.trim())
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Supabase getProfileByEmail notice:', error.message);
+      return null;
+    }
+    return data ? mapProfileFromRow(data) : null;
+  } catch (err: any) {
+    console.warn('Supabase getProfileByEmail exception:', err?.message);
     return null;
   }
 };

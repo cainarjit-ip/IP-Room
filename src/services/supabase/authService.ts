@@ -169,9 +169,30 @@ export const signOutUser = async (): Promise<void> => {
  */
 export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return null;
-    return await getProfileById(session.user.id);
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.user) return null;
+    let profile = await getProfileById(session.user.id);
+    if (!profile) {
+      const isSuperAdmin = (session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
+      const meta: any = session.user.user_metadata || {};
+      const fullName = meta.full_name || meta.name || session.user.email?.split('@')[0] || 'IP Room User';
+      const assignedRole: UserRole = isSuperAdmin ? 'admin' : ((meta.role as UserRole) || 'renter');
+
+      profile = {
+        id: session.user.id,
+        name: fullName,
+        email: session.user.email || '',
+        phone: meta.phone || '+977 98XXXXXXXX',
+        role: assignedRole,
+        avatar: meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+        verified: isSuperAdmin,
+        citizenshipVerified: false,
+        university: assignedRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+        studentIdVerified: false,
+      };
+      await upsertProfile(profile);
+    }
+    return profile;
   } catch (err) {
     console.warn('Error getting current user profile:', err);
     return null;
@@ -179,16 +200,41 @@ export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
 };
 
 /**
- * Auth state listener
+ * Auth state listener with automatic profile synthesis for Google OAuth redirects
  */
 export const onAuthStateChange = (
   callback: (user: UserProfile | null) => void
 ): (() => void) => {
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
-      const profile = await getProfileById(session.user.id);
+      let profile = await getProfileById(session.user.id);
+      if (!profile) {
+        const isSuperAdmin = (session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
+        const pendingRole = (localStorage.getItem('iproom_pending_oauth_role') as UserRole) || (isSuperAdmin ? 'admin' : 'renter');
+        const meta: any = session.user.user_metadata || {};
+        const fullName = meta.full_name || meta.name || session.user.email?.split('@')[0] || 'IP Room User';
+        const assignedRole: UserRole = isSuperAdmin ? 'admin' : (meta.role as UserRole) || pendingRole;
+
+        profile = {
+          id: session.user.id,
+          name: fullName,
+          email: session.user.email || '',
+          phone: meta.phone || '+977 98XXXXXXXX',
+          role: assignedRole,
+          avatar: meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+          verified: isSuperAdmin,
+          citizenshipVerified: false,
+          university: assignedRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+          studentIdVerified: false,
+        };
+        // Persist profile asynchronously in background
+        upsertProfile(profile).catch(e => console.warn('Background profile sync notice:', e));
+      } else if ((session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com' && profile.role !== 'admin') {
+        profile = { ...profile, role: 'admin', verified: true };
+        upsertProfile(profile).catch(e => console.warn('Background profile sync notice:', e));
+      }
       callback(profile);
-    } else {
+    } else if (event === 'SIGNED_OUT') {
       callback(null);
     }
   });

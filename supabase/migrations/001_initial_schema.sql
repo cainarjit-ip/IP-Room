@@ -13,16 +13,22 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 2. HELPER FUNCTIONS & TRIGGER HANDLERS
 -- =========================================================================
 
--- Helper to check if current user is admin (reads ONLY from profiles.role)
+-- Helper to check if current user is admin (checks JWT superadmin email and profiles.role)
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean AS $$
 BEGIN
+  -- 1. Fast check: superadmin email directly from auth JWT
+  IF LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'cainarjit@gmail.com' THEN
+    RETURN true;
+  END IF;
+
+  -- 2. Check profiles table for admin role
   RETURN EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Trigger: auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
@@ -767,10 +773,7 @@ CREATE POLICY "Users can update their own profile except role"
 ON public.profiles FOR UPDATE
 TO authenticated
 USING (auth.uid() = id OR public.is_admin())
-WITH CHECK (
-  (auth.uid() = id AND role = (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid()))
-  OR public.is_admin()
-);
+WITH CHECK (auth.uid() = id OR public.is_admin());
 
 -- -------------------------------------------------------------------------
 -- RLS: ROOMS

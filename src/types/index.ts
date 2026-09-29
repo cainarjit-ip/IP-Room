@@ -178,7 +178,7 @@ export interface ModerationLogEntry {
   action: 'approved' | 'rejected' | 'suspended' | 'unpublished' | 'restored' | 'deleted';
   previousStatus: ListingStatus;
   newStatus: ListingStatus;
-  moderatorId: string;
+  moderatorId?: string;
   moderatorName: string;
   reason?: string;
   timestamp: string;
