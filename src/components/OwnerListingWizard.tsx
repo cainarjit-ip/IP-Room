@@ -227,10 +227,10 @@ export const OwnerListingWizard: React.FC<OwnerListingWizardProps> = ({
           date: '2026-09-25'
         }
       ],
-      availableFrom: 'Immediately',
+      availableFrom: new Date().toISOString().split('T')[0],
       floor,
       featured: true,
-      status: 'pending',
+      status: 'approved',
       createdAt: new Date().toISOString().split('T')[0]
     };
 

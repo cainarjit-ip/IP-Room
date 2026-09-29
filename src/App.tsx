@@ -301,7 +301,19 @@ export default function App() {
   const t = getTranslation(language);
 
   // Data states - Supabase is single source of truth for rooms & moderation
-  const [rooms, setRooms] = useState<RoomListing[]>([]);
+  const [rooms, setRooms] = useState<RoomListing[]>(() => {
+    try {
+      const stored = localStorage.getItem('iproom_local_rooms');
+      if (stored) {
+        const local = JSON.parse(stored);
+        if (Array.isArray(local) && local.length > 0) {
+          const ids = new Set(local.map((r: any) => r.id));
+          return [...local, ...INITIAL_ROOMS.filter(r => !ids.has(r.id))];
+        }
+      }
+    } catch (e) {}
+    return INITIAL_ROOMS;
+  });
   const [moderationLogs, setModerationLogs] = useState<ModerationLogEntry[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [disputes, setDisputes] = useState<DisputeTicket[]>([]);
@@ -309,8 +321,11 @@ export default function App() {
   // Load public rooms from Supabase on mount
   useEffect(() => {
     fetchRoomsFromFirestore().then(remoteRooms => {
-      if (remoteRooms) {
-        setRooms(remoteRooms);
+      if (remoteRooms && remoteRooms.length > 0) {
+        const remoteIds = new Set(remoteRooms.map(r => r.id));
+        setRooms([...remoteRooms, ...INITIAL_ROOMS.filter(r => !remoteIds.has(r.id))]);
+      } else {
+        setRooms(prev => (prev.length > 0 ? prev : INITIAL_ROOMS));
       }
     });
   }, []);

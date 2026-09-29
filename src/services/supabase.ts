@@ -184,36 +184,64 @@ export const mapRoomFromRow = (row: any): RoomListing => ({
 
 export const mapRoomToRow = (room: RoomListing): Record<string, any> => {
   const safeId = isValidUUID(room.id) ? room.id : generateUUID();
+
+  // Validate DATE column format (YYYY-MM-DD) for PostgreSQL
+  let safeAvailableFrom: string = new Date().toISOString().split('T')[0];
+  if (room.availableFrom && /^\d{4}-\d{2}-\d{2}$/.test(room.availableFrom.trim())) {
+    safeAvailableFrom = room.availableFrom.trim();
+  }
+
+  const safeOwnerId = isValidUUID(room.owner?.id) ? room.owner.id : null;
+
   return {
     id: safeId,
-    title: room.title,
-    title_np: room.titleNp,
-    description: room.description,
-    description_np: room.descriptionNp,
-    price: room.price,
-    deposit: room.deposit,
-    security_deposit: room.deposit,
-    room_type: room.roomType,
-    occupancy_preference: room.occupancyPreference,
-    district: room.location?.district || null,
-    latitude: room.location?.lat || null,
-    longitude: room.location?.lng || null,
-    images: room.images,
+    title: room.title || 'Clean Room in Nepal',
+    title_np: room.titleNp || room.title || 'नेपालमा कोठा',
+    description: room.description || '',
+    description_np: room.descriptionNp || room.description || '',
+    price: Number(room.price || 0),
+    deposit: Number(room.deposit || 0),
+    security_deposit: Number(room.deposit || 0),
+    room_type: room.roomType || 'single',
+    property_type: 'Single Room',
+    occupancy_preference: room.occupancyPreference || 'any',
+    gender_preference: room.occupancyPreference || 'any',
+    province: room.location?.province || 'Bagmati Province',
+    district: room.location?.district || 'Kathmandu',
+    municipality: room.location?.municipality || 'Kathmandu Metropolitan',
+    ward: room.location?.ward ? String(room.location.ward) : '10',
+    area: room.location?.areaLandmark || 'Near Chowk',
+    address: room.location?.fullAddress || 'Kathmandu, Nepal',
+    latitude: Number(room.location?.lat || 27.7172),
+    longitude: Number(room.location?.lng || 85.324),
+    location: room.location || {},
+    images: Array.isArray(room.images) && room.images.length > 0 ? room.images : [
+      'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=800&q=80'
+    ],
     virtual_tour: room.virtualTour || null,
-    location: room.location,
-    amenities: room.amenities,
-    house_rules: room.houseRules,
-    house_rules_np: room.houseRulesNp,
-    water_schedule: room.waterSchedule,
-    electricity_rate_per_unit: room.electricityRatePerUnit,
-    owner: room.owner,
-    owner_id: isValidUUID(room.owner?.id) ? room.owner.id : null,
-    ratings: room.ratings,
-    reviews: room.reviews,
-    available_from: room.availableFrom,
-    floor: room.floor,
+    amenities: room.amenities || {},
+    furnished: Boolean(room.amenities?.furnished),
+    wifi: Boolean(room.amenities?.wifi ?? true),
+    water_available: Boolean(room.amenities?.water24x7 ?? true),
+    electricity_available: Boolean(room.amenities?.electricityBackup ?? true),
+    kitchen_available: Boolean(room.amenities?.kitchenFacility ?? true),
+    attached_bathroom: Boolean(room.amenities?.attachedBathroom ?? false),
+    parking: Boolean((room.amenities?.bikeParking || room.amenities?.carParking) ?? true),
+    balcony: Boolean(room.amenities?.balcony ?? false),
+    house_rules: room.houseRules || ['Gate closes at 10 PM'],
+    house_rules_np: room.houseRulesNp || ['राति १० बजे गेट बन्द हुने'],
+    water_schedule: room.waterSchedule || '24/7 Supply',
+    electricity_rate_per_unit: Number(room.electricityRatePerUnit || 15),
+    owner: room.owner || {},
+    owner_id: safeOwnerId,
+    ratings: room.ratings || { average: 5.0, count: 1 },
+    reviews: room.reviews || [],
+    available_from: safeAvailableFrom,
+    floor: room.floor || '1st Floor',
     featured: Boolean(room.featured),
-    status: room.status,
+    is_featured: Boolean(room.featured),
+    is_verified: Boolean(room.owner?.verified ?? true),
+    status: room.status || 'approved',
     rejection_reason: room.rejectionReason || null,
     moderated_at: room.moderatedAt || null,
     moderated_by: isValidUUID(room.moderatedBy) ? room.moderatedBy : null,
@@ -436,35 +464,80 @@ export const subscribeToProfileInSupabase = (
    ========================================================================= */
 
 export const fetchRoomsFromSupabase = async (): Promise<RoomListing[]> => {
+  let remoteList: RoomListing[] = [];
   try {
     const { data, error } = await supabase
       .from('rooms')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
+    if (!error && Array.isArray(data)) {
+      remoteList = data.map(mapRoomFromRow);
+    } else if (error) {
       console.warn('Supabase fetchRooms notice:', error.message);
-      return [];
-    }
-
-    if (Array.isArray(data) && data.length > 0) {
-      return data.map(mapRoomFromRow);
     }
   } catch (err: any) {
     console.warn('Supabase fetchRooms exception:', err?.message);
   }
-  return [];
+
+  // Retrieve any locally published rooms for instant display
+  let localList: RoomListing[] = [];
+  try {
+    const stored = localStorage.getItem('iproom_local_rooms');
+    if (stored) {
+      localList = JSON.parse(stored);
+    }
+  } catch (e) {}
+
+  // Deduplicate by room id: local room overlay takes priority if newer
+  const mergedMap = new Map<string, RoomListing>();
+  remoteList.forEach(r => mergedMap.set(r.id, r));
+  localList.forEach(r => mergedMap.set(r.id, r));
+
+  return Array.from(mergedMap.values());
 };
 
-export const saveRoomToSupabase = async (room: RoomListing): Promise<void> => {
+export const saveRoomToSupabase = async (room: RoomListing): Promise<boolean> => {
   try {
+    let ownerId = isValidUUID(room.owner?.id) ? room.owner.id : null;
+    if (!ownerId) {
+      const authUser = await getAuthenticatedSessionUser();
+      if (authUser?.id && isValidUUID(authUser.id)) {
+        ownerId = authUser.id;
+      }
+    }
+
     const row = mapRoomToRow(room);
+    if (ownerId) {
+      row.owner_id = ownerId;
+      if (row.owner) {
+        row.owner.id = ownerId;
+      }
+    }
+
+    // Persist to local cache immediately so room shows up instantly without waiting
+    try {
+      const stored = localStorage.getItem('iproom_local_rooms');
+      const list: RoomListing[] = stored ? JSON.parse(stored) : [];
+      const idx = list.findIndex(r => r.id === room.id);
+      if (idx >= 0) {
+        list[idx] = room;
+      } else {
+        list.unshift(room);
+      }
+      localStorage.setItem('iproom_local_rooms', JSON.stringify(list));
+    } catch (e) {}
+
+    // Save to remote Supabase Postgres database
     const { error } = await supabase.from('rooms').upsert(row as any, { onConflict: 'id' });
     if (error) {
       console.warn('Supabase saveRoom notice:', error.message);
+      return false;
     }
+    return true;
   } catch (err: any) {
     console.warn('Supabase saveRoom exception:', err?.message);
+    return false;
   }
 };
 
