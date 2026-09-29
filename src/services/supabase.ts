@@ -764,3 +764,14 @@ export const trackAnalyticsEvent = async (
   }
 };
 
+/* =========================================================================
+   Direct Supabase Database Aliases
+   ========================================================================= */
+export const fetchRoomsFromFirestore = fetchRoomsFromSupabase;
+export const saveRoomToFirestore = saveRoomToSupabase;
+export const updateRoomStatusInFirestore = updateRoomStatusInSupabase;
+export const deleteRoomFromFirestore = deleteRoomFromSupabase;
+export const recordModerationLog = recordModerationLogInSupabase;
+export const fetchModerationLogs = fetchModerationLogsFromSupabase;
+
+

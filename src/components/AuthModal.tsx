@@ -18,8 +18,9 @@ import {
   registerWithEmail,
   loginWithEmail,
   logoutUser,
-} from '../services/firebase';
-import { sendPasswordResetEmail } from '../services/supabase';
+  sendPasswordResetEmail,
+  getCurrentUserProfile,
+} from '../services/supabase';
 
 interface AuthModalProps {
   language: Language;
@@ -52,20 +53,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loadingProvider, setLoadingProvider] = useState<'google' | 'facebook' | 'email' | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Handle Google Sign-in via Firebase Auth Popup
+  // Handle Google Sign-in via Supabase OAuth
   const handleGoogleAuth = async () => {
     setLoadingProvider('google');
     setErrorMsg('');
     try {
-      const profile = await loginWithGoogle(role);
-      if (profile) {
-        onSuccess(profile);
-        onClose();
-      }
+      await loginWithGoogle(role);
+      // Check for session completion if opened in popup
+      const checkInterval = setInterval(async () => {
+        const profile = await getCurrentUserProfile();
+        if (profile) {
+          clearInterval(checkInterval);
+          onSuccess(profile);
+          onClose();
+        }
+      }, 1000);
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        setLoadingProvider(null);
+      }, 60000);
     } catch (err: any) {
       console.warn('Google sign-in error:', err);
       setErrorMsg(err?.message || 'Google sign-in could not be completed. Please try again.');
-    } finally {
       setLoadingProvider(null);
     }
   };

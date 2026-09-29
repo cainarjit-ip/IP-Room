@@ -1,27 +1,5 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  getMessaging,
-  getToken,
-  onMessage,
-  isSupported,
-  Messaging,
-} from 'firebase/messaging';
-import {
-  collection,
-  addDoc,
-  doc,
-  updateDoc,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-  limit,
-  serverTimestamp,
-  setDoc,
-} from 'firebase/firestore';
-import { db, auth } from './firebase';
+import { supabase, isValidUUID } from '../lib/supabase';
 import { UserProfile, UserRole, BookingRequest } from '../types';
-import firebaseConfig from '../../firebase-applet-config.json';
 
 export type NotificationType =
   | 'booking_inquiry'
@@ -32,7 +10,7 @@ export type NotificationType =
 export interface AppNotification {
   id: string;
   toUserId: string;
-  toRole: 'renter' | 'owner' | 'all';
+  toRole: UserRole | 'all';
   type: NotificationType;
   title: string;
   body: string;
@@ -69,47 +47,8 @@ const notifyInAppListeners = (notification: AppNotification) => {
   });
 };
 
-// Messaging instance holder
-let messagingInstance: Messaging | null = null;
-let isMessagingSupportedChecked = false;
-let isMessagingSupported = false;
-
 /**
- * Initialize FCM Messaging safely (with browser support verification)
- */
-export const getSafeMessaging = async (): Promise<Messaging | null> => {
-  if (typeof window === 'undefined') return null;
-
-  if (!isMessagingSupportedChecked) {
-    try {
-      isMessagingSupported = await isSupported();
-      isMessagingSupportedChecked = true;
-    } catch (e) {
-      console.warn('FCM isSupported check notice:', e);
-      isMessagingSupported = false;
-      isMessagingSupportedChecked = true;
-    }
-  }
-
-  if (!isMessagingSupported) {
-    return null;
-  }
-
-  if (!messagingInstance) {
-    try {
-      const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-      messagingInstance = getMessaging(app);
-    } catch (e) {
-      console.warn('Could not instantiate FCM Messaging:', e);
-      return null;
-    }
-  }
-
-  return messagingInstance;
-};
-
-/**
- * Request Browser Push Notification Permission and retrieve FCM device token
+ * Request Browser Push Notification Permission
  */
 export const requestPushNotificationPermission = async (
   currentUser: UserProfile | null
@@ -124,191 +63,153 @@ export const requestPushNotificationPermission = async (
       return { status: permission, token: null };
     }
 
-    const messaging = await getSafeMessaging();
-    let fcmToken: string | null = null;
-
-    if (messaging && 'serviceWorker' in navigator) {
-      try {
-        // Register service worker for FCM background push
-        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-        fcmToken = await getToken(messaging, {
-          serviceWorkerRegistration: registration,
-          vapidKey: 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuYtr3qMg740mqqZ36vdVuBV4Y'
-        });
-      } catch (tokenErr) {
-        console.warn('FCM device registration token notice:', tokenErr);
-        // Fallback demo device registration token for testing
-        fcmToken = `fcm-token-${currentUser?.id || 'guest'}-${Date.now()}`;
-      }
-    } else {
-      fcmToken = `fcm-web-${currentUser?.id || 'guest'}-${Date.now()}`;
-    }
-
-    // Persist device token to user document in Firestore if logged in
-    if (currentUser && fcmToken) {
-      try {
-        const userRef = doc(db, 'users', currentUser.id);
-        await updateDoc(userRef, {
-          fcmToken,
-          fcmTokenUpdatedAt: serverTimestamp(),
-          pushNotificationsEnabled: true,
-        });
-      } catch (e) {
-        console.warn('Could not save FCM token to Firestore user document:', e);
-      }
-    }
-
-    return { status: 'granted', token: fcmToken };
-  } catch (error) {
-    console.warn('Error requesting push notification permission:', error);
+    const token = `supabase-web-${currentUser?.id || 'guest'}-${Date.now()}`;
+    return { status: permission, token };
+  } catch (err) {
+    console.warn('Notification permission error:', err);
     return { status: 'denied', token: null };
   }
 };
 
 /**
- * Display native browser push notification if permitted
- */
-export const triggerBrowserNotification = (
-  title: string,
-  options: NotificationOptions
-) => {
-  if (typeof window === 'undefined' || !('Notification' in window)) return;
-
-  if (Notification.permission === 'granted') {
-    try {
-      new Notification(title, {
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        ...options,
-      });
-    } catch (e) {
-      // In some mobile browsers, notification must be triggered through service worker
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'SHOW_NOTIFICATION',
-          title,
-          options,
-        });
-      }
-    }
-  }
-};
-
-/**
- * Listen for foreground FCM messages
+ * Register foreground notification listener for in-app alert banners
  */
 export const setupForegroundFCMListener = async (
-  onReceived: (notification: AppNotification) => void
+  onNotificationReceived: (notification: AppNotification) => void
 ): Promise<(() => void) | null> => {
-  const messaging = await getSafeMessaging();
-  if (!messaging) return null;
-
-  try {
-    const unsubscribe = onMessage(messaging, payload => {
-      const appNotif: AppNotification = {
-        id: `fcm-${Date.now()}`,
-        toUserId: payload.data?.toUserId || 'all',
-        toRole: (payload.data?.toRole as any) || 'all',
-        type: (payload.data?.type as any) || 'system',
-        title: payload.notification?.title || payload.data?.title || 'IP Room Alert',
-        body: payload.notification?.body || payload.data?.body || '',
-        read: false,
-        data: payload.data as any,
-        createdAt: new Date().toISOString(),
-      };
-
-      triggerBrowserNotification(appNotif.title, { body: appNotif.body });
-      notifyInAppListeners(appNotif);
-      onReceived(appNotif);
-    });
-
-    return unsubscribe;
-  } catch (e) {
-    console.warn('Error setting up FCM onMessage listener:', e);
-    return null;
-  }
+  const unsubscribe = addNotificationListener(onNotificationReceived);
+  return unsubscribe;
 };
 
 /**
- * Dispatch Push Notification across FCM, Firestore, and in-app listeners
+ * Send real-time notification via Supabase PostgreSQL
  */
 export const sendPushNotification = async (
   notification: Omit<AppNotification, 'id' | 'createdAt'>
 ): Promise<AppNotification> => {
-  const newNotif: AppNotification = {
+  const createdId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `notif-${Date.now()}`;
+  const now = new Date().toISOString();
+
+  const appNotif: AppNotification = {
     ...notification,
-    id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    createdAt: new Date().toISOString(),
+    id: createdId,
+    createdAt: now,
   };
 
-  // 1. Trigger local in-app banner toast immediately
-  notifyInAppListeners(newNotif);
+  // Broadcast to all active in-app listeners
+  notifyInAppListeners(appNotif);
 
-  // 2. Trigger native OS browser push notification
-  triggerBrowserNotification(newNotif.title, {
-    body: newNotif.body,
-    tag: newNotif.type,
-  });
-
-  // 3. Persist to Firestore notifications collection for persistent notification bell
-  try {
-    const notifCollection = collection(db, 'notifications');
-    await addDoc(notifCollection, {
-      ...newNotif,
-      serverTime: serverTimestamp(),
-    });
-  } catch (e) {
-    console.warn('Could not persist notification document to Firestore:', e);
+  // Show native browser desktop notification if permission granted
+  if (
+    typeof window !== 'undefined' &&
+    'Notification' in window &&
+    Notification.permission === 'granted'
+  ) {
+    try {
+      new Notification(appNotif.title, {
+        body: appNotif.body,
+        icon: '/vite.svg',
+      });
+    } catch (e) {
+      console.warn('Native notification notice:', e);
+    }
   }
 
-  return newNotif;
+  // Persist into Supabase notifications table if valid UUID
+  if (isValidUUID(notification.toUserId)) {
+    try {
+      await (supabase.from('notifications') as any).insert({
+        id: isValidUUID(createdId) ? createdId : undefined,
+        user_id: notification.toUserId,
+        title: notification.title,
+        message: notification.body,
+        type: notification.type,
+        reference_id: (notification.data?.bookingId && isValidUUID(notification.data.bookingId)) ? notification.data.bookingId : null,
+        is_read: false,
+        created_at: now,
+      });
+    } catch (err) {
+      console.warn('Supabase notification insert notice:', err);
+    }
+  }
+
+  return appNotif;
 };
 
 /**
- * Send real-time notification to owner when a student creates a new booking inquiry
+ * Send real-time notification to owner when student creates a booking inquiry
  */
 export const notifyOwnerOfNewBookingInquiry = async (
-  ownerId: string,
-  booking: BookingRequest
+  arg1: any,
+  arg2?: any
 ): Promise<AppNotification> => {
+  let booking: BookingRequest;
+  let tenantName = 'Student';
+
+  if (typeof arg1 === 'string') {
+    booking = arg2 as BookingRequest;
+  } else {
+    booking = arg1 as BookingRequest;
+    tenantName = arg2 || 'Student';
+  }
+
+  const ownerId = booking?.ownerId || (typeof arg1 === 'string' ? arg1 : 'all');
+  const roomTitle = booking?.roomTitle || 'Room Listing';
+  const totalPaid = booking?.totalPaid || 0;
+
   return sendPushNotification({
     toUserId: ownerId,
     toRole: 'owner',
     type: 'booking_inquiry',
-    title: 'New Booking Inquiry Received! 🏠',
-    body: `${booking.tenantName} (${booking.tenantUniversity || 'Student'}) requested "${booking.roomTitle}" with an advance deposit of रु. ${booking.totalPaid.toLocaleString('en-IN')}.`,
+    title: 'New Room Booking Request! 🏠',
+    body: `${tenantName} requested to book "${roomTitle}" for NPR ${totalPaid.toLocaleString()}. Review in Owner Dashboard.`,
     read: false,
     data: {
-      bookingId: booking.id,
-      roomId: booking.roomId,
-      senderId: booking.tenantId,
-      senderName: booking.tenantName,
-      amount: booking.totalPaid,
+      bookingId: booking?.id,
+      roomId: booking?.roomId,
+      senderId: booking?.tenantId,
+      senderName: tenantName,
+      amount: totalPaid,
     },
   });
 };
 
 /**
- * Send real-time notification to student when owner accepts/confirms booking
+ * Send real-time notification to student when owner approves/confirms booking
  */
 export const notifyStudentOfBookingConfirmed = async (
-  tenantId: string,
-  booking: BookingRequest,
-  ownerName: string = 'Ram Bahadur Shrestha'
+  arg1: any,
+  arg2?: any,
+  arg3?: string
 ): Promise<AppNotification> => {
+  let booking: BookingRequest;
+  let ownerName = 'Landlord';
+
+  if (typeof arg1 === 'string') {
+    booking = arg2 as BookingRequest;
+    ownerName = arg3 || 'Landlord';
+  } else {
+    booking = arg1 as BookingRequest;
+    ownerName = arg2 || 'Landlord';
+  }
+
+  const tenantId = booking?.tenantId || (typeof arg1 === 'string' ? arg1 : 'all');
+  const roomTitle = booking?.roomTitle || 'Room Listing';
+  const totalPaid = booking?.totalPaid || 0;
+
   return sendPushNotification({
     toUserId: tenantId,
     toRole: 'renter',
     type: 'booking_confirmed',
     title: 'Booking Request Confirmed! 🎉',
-    body: `Landlord ${ownerName} has approved your booking for "${booking.roomTitle}". Your digital tenancy lease agreement is ready!`,
+    body: `Landlord ${ownerName} has approved your booking for "${roomTitle}". Your digital tenancy lease agreement is ready!`,
     read: false,
     data: {
-      bookingId: booking.id,
-      roomId: booking.roomId,
-      senderId: booking.ownerId,
+      bookingId: booking?.id,
+      roomId: booking?.roomId,
+      senderId: booking?.ownerId,
       senderName: ownerName,
-      amount: booking.totalPaid,
+      amount: totalPaid,
     },
   });
 };
@@ -340,68 +241,94 @@ export const notifyChatMessage = async (
 };
 
 /**
- * Subscribe to real-time notifications from Firestore for the current user
+ * Subscribe to real-time notifications from Supabase for the current user
  */
 export const subscribeToRealtimeNotifications = (
   userRole: UserRole,
   userId: string | undefined,
   onUpdate: (notifications: AppNotification[]) => void
 ): (() => void) => {
-  try {
-    const notifCollection = collection(db, 'notifications');
-    // Listen to all notifications for the user's role or targeted directly to them
-    const notifQuery = query(
-      notifCollection,
-      orderBy('serverTime', 'desc'),
-      limit(25)
-    );
-
-    return onSnapshot(
-      notifQuery,
-      snapshot => {
-        const notifs: AppNotification[] = [];
-        snapshot.forEach(docSnap => {
-          const d = docSnap.data();
-          // Filter in memory for role or specific user ID
-          if (
-            d.toRole === 'all' ||
-            d.toRole === userRole ||
-            (userId && (d.toUserId === userId || d.toUserId === 'all'))
-          ) {
-            notifs.push({
-              id: docSnap.id,
-              toUserId: d.toUserId,
-              toRole: d.toRole,
-              type: d.type,
-              title: d.title,
-              body: d.body,
-              read: Boolean(d.read),
-              data: d.data,
-              createdAt: d.createdAt || new Date().toISOString(),
-            });
-          }
-        });
-        onUpdate(notifs);
-      },
-      err => {
-        console.warn('Realtime notifications snapshot notice:', err?.message);
-      }
-    );
-  } catch (e) {
-    console.warn('Could not establish notifications listener:', e);
+  if (!userId || !isValidUUID(userId)) {
     return () => {};
   }
+
+  // Initial load from Supabase
+  supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(25)
+    .then(({ data, error }) => {
+      if (!error && data) {
+        const notifs: AppNotification[] = data.map((row: any) => ({
+          id: row.id,
+          toUserId: row.user_id,
+          toRole: userRole,
+          type: (row.type as NotificationType) || 'system',
+          title: row.title || 'IP Room Notification',
+          body: row.message || '',
+          read: Boolean(row.is_read),
+          createdAt: row.created_at || new Date().toISOString(),
+          data: row.reference_id ? { bookingId: row.reference_id } : undefined,
+        }));
+        onUpdate(notifs);
+      }
+    });
+
+  // Realtime subscription via Supabase Channel
+  const channel = supabase
+    .channel(`notifs-live-${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      },
+      () => {
+        // Refresh notifications from Supabase
+        supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(25)
+          .then(({ data }) => {
+            if (data) {
+              const refreshed: AppNotification[] = data.map((row: any) => ({
+                id: row.id,
+                toUserId: row.user_id,
+                toRole: userRole,
+                type: (row.type as NotificationType) || 'system',
+                title: row.title || 'IP Room Notification',
+                body: row.message || '',
+                read: Boolean(row.is_read),
+                createdAt: row.created_at || new Date().toISOString(),
+                data: row.reference_id ? { bookingId: row.reference_id } : undefined,
+              }));
+              onUpdate(refreshed);
+            }
+          });
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 };
 
 /**
- * Mark notification as read in Firestore
+ * Mark notification as read in Supabase
  */
 export const markNotificationAsRead = async (notificationId: string): Promise<void> => {
+  if (!isValidUUID(notificationId)) return;
   try {
-    const notifRef = doc(db, 'notifications', notificationId);
-    await updateDoc(notifRef, {
-      read: true,
-    });
+    await (supabase.from('notifications') as any)
+      .update({ is_read: true })
+      .eq('id', notificationId);
   } catch (e) {
     console.warn('Could not update notification read status:', e);
   }

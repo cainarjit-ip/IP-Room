@@ -27,6 +27,8 @@ import {
   calculateRecommendations,
 } from './services/recommendationEngine';
 import {
+  supabase,
+  isValidUUID,
   logoutUser,
   getUserProfile,
   subscribeToUserProfile,
@@ -42,10 +44,6 @@ import {
   fetchBookingsFromSupabase,
   updateBookingStatusInSupabase,
   ensureProfileAfterOAuthRedirect,
-} from './services/firebase';
-import {
-  supabase,
-  isValidUUID,
   getUserWishlistRoomIds,
   toggleWishlistItem,
   getUserComparisonRoomIds,

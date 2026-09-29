@@ -194,3 +194,5 @@ export const subscribeToProfile = (
     supabase.removeChannel(channel);
   };
 };
+
+export const subscribeToProfileInSupabase = subscribeToProfile;
