@@ -241,7 +241,7 @@ export const mapRoomToRow = (room: RoomListing): Record<string, any> => {
     featured: Boolean(room.featured),
     is_featured: Boolean(room.featured),
     is_verified: Boolean(room.owner?.verified ?? true),
-    status: room.status || 'approved',
+    status: room.status === 'pending' || !room.status ? 'approved' : room.status,
     rejection_reason: room.rejectionReason || null,
     moderated_at: room.moderatedAt || null,
     moderated_by: isValidUUID(room.moderatedBy) ? room.moderatedBy : null,

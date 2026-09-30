@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Language, UserRole, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
 import { NotificationCenter } from './NotificationCenter';
-import { AppNotification } from '../services/fcmService';
+import { AppNotification } from '../services/supabase/notificationService';
 import {
   Home,
   Heart,

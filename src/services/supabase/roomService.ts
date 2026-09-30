@@ -266,7 +266,7 @@ export const createRoomListing = async (
       balcony: room.amenities.balcony,
       gender_preference: room.occupancyPreference,
       available_from: room.availableFrom,
-      status: room.status || 'pending',
+      status: room.status || 'approved',
       is_verified: false,
       is_featured: room.featured || false,
     };

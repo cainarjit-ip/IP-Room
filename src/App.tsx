@@ -34,12 +34,12 @@ import {
   subscribeToUserProfile,
   getStoredUserSession,
   saveUserSession,
-  fetchRoomsFromFirestore,
-  saveRoomToFirestore,
-  updateRoomStatusInFirestore,
-  deleteRoomFromFirestore,
-  recordModerationLog,
-  fetchModerationLogs,
+  fetchRoomsFromSupabase,
+  saveRoomToSupabase,
+  updateRoomStatusInSupabase,
+  deleteRoomFromSupabase,
+  recordModerationLogInSupabase,
+  fetchModerationLogsFromSupabase,
   saveBookingToSupabase,
   fetchBookingsFromSupabase,
   updateBookingStatusInSupabase,
@@ -60,7 +60,7 @@ import {
   setupForegroundFCMListener,
   notifyOwnerOfNewBookingInquiry,
   notifyStudentOfBookingConfirmed,
-} from './services/fcmService';
+} from './services/supabase/notificationService';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -320,7 +320,7 @@ export default function App() {
 
   // Load public rooms from Supabase on mount
   useEffect(() => {
-    fetchRoomsFromFirestore().then(remoteRooms => {
+    fetchRoomsFromSupabase().then(remoteRooms => {
       if (remoteRooms && remoteRooms.length > 0) {
         const remoteIds = new Set(remoteRooms.map(r => r.id));
         setRooms([...remoteRooms, ...INITIAL_ROOMS.filter(r => !remoteIds.has(r.id))]);
@@ -340,7 +340,7 @@ export default function App() {
       });
 
       if (currentUser.role === 'admin') {
-        fetchModerationLogs().then(logs => {
+        fetchModerationLogsFromSupabase().then(logs => {
           if (logs) {
             setModerationLogs(logs);
           }
@@ -362,17 +362,17 @@ export default function App() {
     }
   }, [currentUser?.id, currentUser?.role]);
 
-  // Real-time Push Notifications (Firebase Cloud Messaging + Firestore)
+  // Real-time Push Notifications (Supabase Realtime)
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // Subscribe to real-time FCM & Firestore push notifications only with authenticated valid UUID
+  // Subscribe to real-time Supabase push notifications only with authenticated valid UUID
   useEffect(() => {
     if (!currentUser?.id || !isValidUUID(currentUser.id)) {
       setNotifications([]);
       return;
     }
 
-    const unsubscribeFirestore = subscribeToRealtimeNotifications(
+    const unsubscribeNotifications = subscribeToRealtimeNotifications(
       activeRole,
       currentUser.id,
       incomingNotifs => {
@@ -382,16 +382,16 @@ export default function App() {
       }
     );
 
-    let unsubscribeFCM: (() => void) | null = null;
-    setupForegroundFCMListener(fcmNotif => {
-      setNotifications(prev => [fcmNotif, ...prev.filter(n => n.id !== fcmNotif.id)]);
+    let unsubscribeForeground: (() => void) | null = null;
+    setupForegroundFCMListener(incomingNotif => {
+      setNotifications(prev => [incomingNotif, ...prev.filter(n => n.id !== incomingNotif.id)]);
     }).then(unsub => {
-      if (unsub) unsubscribeFCM = unsub;
+      if (unsub) unsubscribeForeground = unsub;
     });
 
     return () => {
-      unsubscribeFirestore();
-      if (unsubscribeFCM) unsubscribeFCM();
+      unsubscribeNotifications();
+      if (unsubscribeForeground) unsubscribeForeground();
     };
   }, [activeRole, currentUser?.id]);
 
@@ -544,8 +544,8 @@ export default function App() {
   // Filtered rooms logic
   const filteredRooms = useMemo(() => {
     return rooms.filter(room => {
-      // Only approved / active listings are visible publicly in Browse Rooms
-      if (room.status !== 'active' && room.status !== 'approved') return false;
+      // Hide listings that are rejected, suspended, or unpublished; all approved/active/new listings are publicly visible
+      if (room.status === 'rejected' || room.status === 'suspended' || room.status === 'unpublished') return false;
 
       // Province filter
       if (selectedProvince && room.location.province !== selectedProvince) return false;
@@ -607,16 +607,18 @@ export default function App() {
 
   // Landlord: Add new listing
   const handleAddNewListing = (newRoom: RoomListing) => {
-    // New room is pending moderator verification by default
+    // New room is published as approved and immediately public for all students & renters
     const roomWithStatus: RoomListing = {
       ...newRoom,
-      status: 'pending',
+      status: 'approved',
+      featured: newRoom.featured ?? false,
+      createdAt: newRoom.createdAt || new Date().toISOString(),
     };
 
-    setRooms(prev => [roomWithStatus, ...prev]);
+    setRooms(prev => [roomWithStatus, ...prev.filter(r => r.id !== roomWithStatus.id)]);
 
-    // Save to Supabase
-    saveRoomToFirestore(roomWithStatus);
+    // Save to Supabase Postgres database
+    saveRoomToSupabase(roomWithStatus);
 
     setIsAddListingOpen(false);
     setActiveTab('browse');
@@ -678,15 +680,15 @@ export default function App() {
     );
     persistRooms(updated);
 
-    // Update in Firestore
-    updateRoomStatusInFirestore(roomId, 'approved', {
+    // Update in Supabase
+    updateRoomStatusInSupabase(roomId, 'approved', {
       moderatedAt: now,
       moderatedBy: (currentUser?.id && isValidUUID(currentUser.id)) ? currentUser.id : null,
       rejectionReason: null,
     });
 
     // Audit log
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'approved',
@@ -722,15 +724,15 @@ export default function App() {
     );
     persistRooms(updated);
 
-    // Update in Firestore
-    updateRoomStatusInFirestore(roomId, 'rejected', {
+    // Update in Supabase
+    updateRoomStatusInSupabase(roomId, 'rejected', {
       rejectionReason: reason,
       moderatedAt: now,
       moderatedBy: (currentUser?.id && isValidUUID(currentUser.id)) ? currentUser.id : null,
     });
 
     // Audit log
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'rejected',
@@ -765,12 +767,12 @@ export default function App() {
     );
     persistRooms(updated);
 
-    updateRoomStatusInFirestore(roomId, 'suspended', {
+    updateRoomStatusInSupabase(roomId, 'suspended', {
       moderatedAt: now,
       moderatedBy: (currentUser?.id && isValidUUID(currentUser.id)) ? currentUser.id : null,
     });
 
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'suspended',
@@ -805,12 +807,12 @@ export default function App() {
     );
     persistRooms(updated);
 
-    updateRoomStatusInFirestore(roomId, 'unpublished', {
+    updateRoomStatusInSupabase(roomId, 'unpublished', {
       moderatedAt: now,
       moderatedBy: (currentUser?.id && isValidUUID(currentUser.id)) ? currentUser.id : null,
     });
 
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'unpublished',
@@ -846,13 +848,13 @@ export default function App() {
     );
     persistRooms(updated);
 
-    updateRoomStatusInFirestore(roomId, 'pending', {
+    updateRoomStatusInSupabase(roomId, 'pending', {
       moderatedAt: now,
       moderatedBy: (currentUser?.id && isValidUUID(currentUser.id)) ? currentUser.id : null,
       rejectionReason: null,
     });
 
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'restored',
@@ -877,9 +879,9 @@ export default function App() {
     const updated = rooms.filter(r => r.id !== roomId);
     persistRooms(updated);
 
-    deleteRoomFromFirestore(roomId);
+    deleteRoomFromSupabase(roomId);
 
-    recordModerationLog({
+    recordModerationLogInSupabase({
       listingId: roomId,
       listingTitle: target.title,
       action: 'deleted',

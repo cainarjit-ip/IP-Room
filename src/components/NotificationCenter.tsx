@@ -16,7 +16,7 @@ import {
   requestPushNotificationPermission,
   markNotificationAsRead,
   addNotificationListener,
-} from '../services/fcmService';
+} from '../services/supabase/notificationService';
 import { UserProfile, UserRole, Language } from '../types';
 
 interface NotificationCenterProps {

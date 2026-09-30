@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { RoomListing, Language, ChatMessage, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
-import { notifyChatMessage } from '../services/fcmService';
+import { notifyChatMessage } from '../services/supabase/notificationService';
 import { generateUUID, isValidUUID } from '../services/supabase';
 import { X, Send, ShieldCheck, CheckCheck } from 'lucide-react';
 
