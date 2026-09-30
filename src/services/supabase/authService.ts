@@ -73,13 +73,13 @@ export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise
     }
 
     if (data?.url) {
-      const popup = window.open(
-        data.url,
-        'supabase_google_signin',
-        'width=500,height=650,left=150,top=100,status=no,toolbar=no,menubar=no'
-      );
-      if (!popup || popup.closed) {
-        window.top!.location.href = data.url;
+      try {
+        const popup = window.open(data.url, '_blank', 'width=500,height=650');
+        if (!popup || popup.closed) {
+          window.location.href = data.url;
+        }
+      } catch (e) {
+        window.location.href = data.url;
       }
       return;
     }
@@ -116,13 +116,13 @@ export const loginWithFacebook = async (defaultRole: UserRole = 'renter'): Promi
 
     if (error) throw new Error(error.message || 'Facebook sign-in could not be started.');
     if (data?.url) {
-      const popup = window.open(
-        data.url,
-        'supabase_fb_signin',
-        'width=500,height=650,left=150,top=100,status=no,toolbar=no,menubar=no'
-      );
-      if (!popup || popup.closed) {
-        window.top!.location.href = data.url;
+      try {
+        const popup = window.open(data.url, '_blank', 'width=500,height=650');
+        if (!popup || popup.closed) {
+          window.location.href = data.url;
+        }
+      } catch (e) {
+        window.location.href = data.url;
       }
       return;
     }
