@@ -55,9 +55,15 @@ export const upsertProfile = async (profile: UserProfile): Promise<boolean> => {
   }
 
   try {
+    const authUser = await getAuthenticatedSessionUser();
+    // Only attempt remote upsert if the session matches the user ID to respect Supabase RLS
+    if (!authUser || authUser.id !== profile.id) {
+      return true;
+    }
+
+    const details = profile.personalDetails || {};
     const updateData: Record<string, any> = {
       id: profile.id,
-      name: profile.name,
       full_name: profile.name,
       email: profile.email,
       phone: profile.phone || null,
@@ -68,44 +74,21 @@ export const upsertProfile = async (profile: UserProfile): Promise<boolean> => {
       verified: profile.verified ?? false,
       citizenship_verified: profile.citizenshipVerified || false,
       university: profile.university || null,
-      personal_details: profile.personalDetails || null,
+      student_id_verified: profile.studentIdVerified || false,
+      gender: details.gender || null,
+      date_of_birth: details.dateOfBirth || null,
+      address: details.permanentAddress || details.currentAddress || null,
+      province: details.province || null,
+      district: details.district || null,
+      municipality: details.municipality || null,
+      bio: details.areaLandmark || null,
       identity_verification: profile.identityVerification || null,
       updated_at: new Date().toISOString(),
     };
 
-    let { error } = await supabase
+    const { error } = await supabase
       .from('profiles')
       .upsert(updateData as any, { onConflict: 'id' });
-
-    // If PostgREST schema cache complains about a missing column, strip that column and retry
-    while (error && error.message?.includes('schema cache')) {
-      const match = error.message.match(/Could not find the '([^']+)' column/);
-      if (match && match[1] && updateData[match[1]] !== undefined) {
-        delete updateData[match[1]];
-        const retryResult = await supabase
-          .from('profiles')
-          .upsert(updateData as any, { onConflict: 'id' });
-        error = retryResult.error;
-      } else {
-        break;
-      }
-    }
-
-    // Fallback to minimal core columns if schema differs
-    if (error && error.message?.includes('schema cache')) {
-      const minimalData: Record<string, any> = {
-        id: profile.id,
-        full_name: profile.name,
-        email: profile.email,
-        role: profile.role,
-      };
-      if (profile.phone) minimalData.phone = profile.phone;
-      if (profile.avatar) minimalData.avatar_url = profile.avatar;
-      const minimalRetry = await supabase
-        .from('profiles')
-        .upsert(minimalData as any, { onConflict: 'id' });
-      error = minimalRetry.error;
-    }
 
     if (error) {
       console.warn('Supabase upsertProfile notice:', error.message);

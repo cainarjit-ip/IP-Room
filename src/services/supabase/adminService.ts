@@ -85,18 +85,13 @@ export const getAllRoomsForAdmin = async (): Promise<RoomListing[]> => {
     if (!authUser) return [];
 
     const { data, error } = await (supabase
-      .from('room_listings')
-      .select('*, profiles(full_name, phone, avatar_url, is_verified, citizenship_verified), room_images(image_url, is_primary, sort_order)')
+      .from('rooms')
+      .select('*')
       .order('created_at', { ascending: false }) as any);
 
     if (error || !data) return [];
 
-    return data.map((row: any) => {
-      const images = (row.room_images || [])
-        .sort((a: any, b: any) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0))
-        .map((img: any) => img.image_url);
-      return mapRoomRowToModel(row, images);
-    });
+    return data.map((row: any) => mapRoomRowToModel(row, row.images || []));
   } catch (err) {
     console.warn('Exception in getAllRoomsForAdmin:', err);
     return [];
@@ -121,10 +116,10 @@ export const moderateRoomListing = async (
   try {
     // 1. Update room status
     const { error: roomError } = await (supabase
-      .from('room_listings') as any)
+      .from('rooms') as any)
       .update({
         status: newStatus,
-        is_verified: newStatus === 'approved',
+        updated_at: new Date().toISOString(),
       })
       .eq('id', roomId);
 
@@ -132,7 +127,7 @@ export const moderateRoomListing = async (
 
     // 2. Fetch room details to record log
     const { data: roomData } = await (supabase
-      .from('room_listings')
+      .from('rooms')
       .select('title, owner_id')
       .eq('id', roomId)
       .single() as any);
@@ -176,7 +171,7 @@ export const getPlatformStats = async (): Promise<{
 
     const [usersRes, roomsRes, bookingsRes] = await Promise.all([
       supabase.from('profiles').select('id', { count: 'exact', head: true }),
-      supabase.from('room_listings').select('id, status'),
+      supabase.from('rooms').select('id, status'),
       supabase.from('bookings').select('id', { count: 'exact', head: true }),
     ]);
 

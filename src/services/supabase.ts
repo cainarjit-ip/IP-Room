@@ -68,24 +68,32 @@ export const mapProfileFromRow = (row: any): UserProfile => ({
   identityVerification: row.identity_verification ?? row.identityVerification,
 });
 
-export const mapProfileToRow = (profile: UserProfile): Record<string, any> => ({
-  id: profile.id,
-  name: profile.name,
-  full_name: profile.name,
-  email: profile.email,
-  phone: profile.phone,
-  role: profile.role,
-  avatar: profile.avatar,
-  avatar_url: profile.avatar,
-  verified: profile.verified,
-  is_verified: profile.verified,
-  citizenship_verified: Boolean(profile.citizenshipVerified),
-  university: profile.university || null,
-  student_id_verified: Boolean(profile.studentIdVerified),
-  personal_details: profile.personalDetails || null,
-  identity_verification: profile.identityVerification || null,
-  updated_at: new Date().toISOString(),
-});
+export const mapProfileToRow = (profile: UserProfile): Record<string, any> => {
+  const details = profile.personalDetails || {};
+  return {
+    id: profile.id,
+    full_name: profile.name,
+    email: profile.email,
+    phone: profile.phone || null,
+    role: profile.role,
+    avatar: profile.avatar || null,
+    avatar_url: profile.avatar || null,
+    verified: profile.verified ?? false,
+    is_verified: profile.verified ?? false,
+    citizenship_verified: Boolean(profile.citizenshipVerified),
+    university: profile.university || null,
+    student_id_verified: Boolean(profile.studentIdVerified),
+    gender: details.gender || null,
+    date_of_birth: details.dateOfBirth || null,
+    address: details.permanentAddress || details.currentAddress || null,
+    province: details.province || null,
+    district: details.district || null,
+    municipality: details.municipality || null,
+    bio: details.areaLandmark || null,
+    identity_verification: profile.identityVerification || null,
+    updated_at: new Date().toISOString(),
+  };
+};
 
 export const mapRoomFromRow = (row: any): RoomListing => ({
   id: String(row.id),
@@ -201,16 +209,9 @@ export const mapRoomToRow = (room: RoomListing): Record<string, any> => {
     description_np: room.descriptionNp || room.description || '',
     price: Number(room.price || 0),
     deposit: Number(room.deposit || 0),
-    security_deposit: Number(room.deposit || 0),
     room_type: room.roomType || 'single',
-    property_type: 'Single Room',
     occupancy_preference: room.occupancyPreference || 'any',
-    gender_preference: room.occupancyPreference || 'any',
-    province: room.location?.province || 'Bagmati Province',
     district: room.location?.district || 'Kathmandu',
-    municipality: room.location?.municipality || 'Kathmandu Metropolitan',
-    ward: room.location?.ward ? String(room.location.ward) : '10',
-    area: room.location?.areaLandmark || 'Near Chowk',
     address: room.location?.fullAddress || 'Kathmandu, Nepal',
     latitude: Number(room.location?.lat || 27.7172),
     longitude: Number(room.location?.lng || 85.324),
@@ -220,14 +221,6 @@ export const mapRoomToRow = (room: RoomListing): Record<string, any> => {
     ],
     virtual_tour: room.virtualTour || null,
     amenities: room.amenities || {},
-    furnished: Boolean(room.amenities?.furnished),
-    wifi: Boolean(room.amenities?.wifi ?? true),
-    water_available: Boolean(room.amenities?.water24x7 ?? true),
-    electricity_available: Boolean(room.amenities?.electricityBackup ?? true),
-    kitchen_available: Boolean(room.amenities?.kitchenFacility ?? true),
-    attached_bathroom: Boolean(room.amenities?.attachedBathroom ?? false),
-    parking: Boolean((room.amenities?.bikeParking || room.amenities?.carParking) ?? true),
-    balcony: Boolean(room.amenities?.balcony ?? false),
     house_rules: room.houseRules || ['Gate closes at 10 PM'],
     house_rules_np: room.houseRulesNp || ['राति १० बजे गेट बन्द हुने'],
     water_schedule: room.waterSchedule || '24/7 Supply',
@@ -239,8 +232,6 @@ export const mapRoomToRow = (room: RoomListing): Record<string, any> => {
     available_from: safeAvailableFrom,
     floor: room.floor || '1st Floor',
     featured: Boolean(room.featured),
-    is_featured: Boolean(room.featured),
-    is_verified: Boolean(room.owner?.verified ?? true),
     status: room.status === 'pending' || !room.status ? 'approved' : room.status,
     rejection_reason: room.rejectionReason || null,
     moderated_at: room.moderatedAt || null,
@@ -413,6 +404,11 @@ export const saveProfileToSupabase = async (profile: UserProfile): Promise<void>
   }
 
   try {
+    const authUser = await getAuthenticatedSessionUser();
+    if (!authUser || authUser.id !== profile.id) {
+      return;
+    }
+
     const row = mapProfileToRow(profile);
     const { error } = await supabase.from('profiles').upsert(row as any, { onConflict: 'id' });
     if (error) {

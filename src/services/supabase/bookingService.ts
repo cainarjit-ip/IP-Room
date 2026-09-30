@@ -54,7 +54,7 @@ export const getUserBookings = async (
 
     const { data, error } = await (supabase
       .from('bookings')
-      .select('*, room_listings(title, address, room_images(image_url)), renter:profiles!bookings_renter_id_fkey(full_name, phone, email)')
+      .select('*')
       .eq(column, userId)
       .order('created_at', { ascending: false }) as any);
 

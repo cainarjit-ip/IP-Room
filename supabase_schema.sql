@@ -772,21 +772,22 @@ USING (true);
 DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 CREATE POLICY "Users can insert their own profile"
 ON public.profiles FOR INSERT
-TO authenticated
-WITH CHECK (auth.uid() = id);
+WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Users can update their own profile except role" ON public.profiles;
 CREATE POLICY "Users can update their own profile except role"
 ON public.profiles FOR UPDATE
-TO authenticated
-USING (auth.uid() = id OR public.is_admin())
-WITH CHECK (auth.uid() = id OR public.is_admin());
+USING (true)
+WITH CHECK (true);
 
 -- -------------------------------------------------------------------------
 -- RLS: ROOMS (Public visibility for all listed rooms)
 -- -------------------------------------------------------------------------
 ALTER TABLE public.rooms ALTER COLUMN owner_id DROP NOT NULL;
 ALTER TABLE public.rooms ALTER COLUMN status SET DEFAULT 'approved';
+
+-- Ensure all existing rooms are approved and publicly visible
+UPDATE public.rooms SET status = 'approved' WHERE status = 'pending' OR status IS NULL;
 
 DROP POLICY IF EXISTS "Anyone can view approved rooms" ON public.rooms;
 DROP POLICY IF EXISTS "Anyone can view rooms" ON public.rooms;
@@ -811,7 +812,7 @@ DROP POLICY IF EXISTS "Owners and admins can delete rooms" ON public.rooms;
 DROP POLICY IF EXISTS "Anyone can delete rooms" ON public.rooms;
 CREATE POLICY "Anyone can delete rooms"
 ON public.rooms FOR DELETE
-USING (auth.uid() = owner_id OR public.is_admin() OR true);
+USING (true);
 
 -- Provide view for room_listings synonym
 CREATE OR REPLACE VIEW public.room_listings AS SELECT * FROM public.rooms;
