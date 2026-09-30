@@ -232,6 +232,13 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS university TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS student_id_verified BOOLEAN DEFAULT false;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS personal_details JSONB;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS identity_verification JSONB;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS municipality TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS district TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS province TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS bio TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS gender TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS date_of_birth DATE;
 
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);

@@ -208,6 +208,10 @@ export default function App() {
         setActiveRole(sbProfile.role);
 
         // Attach real-time subscription for profile updates
+        if (profileUnsubscribe) {
+          profileUnsubscribe();
+          profileUnsubscribe = null;
+        }
         profileUnsubscribe = subscribeToUserProfile(sbProfile.id, syncedProfile => {
           if (syncedProfile && isValidUUID(syncedProfile.id)) {
             saveUserSession(syncedProfile);

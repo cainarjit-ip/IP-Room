@@ -64,23 +64,51 @@ export const upsertProfile = async (profile: UserProfile): Promise<boolean> => {
       avatar: profile.avatar || null,
       avatar_url: profile.avatar || null,
       role: profile.role,
-      is_verified: profile.verified,
+      is_verified: profile.verified ?? false,
+      verified: profile.verified ?? false,
       citizenship_verified: profile.citizenshipVerified || false,
-      date_of_birth: profile.personalDetails?.dateOfBirth || null,
-      gender: profile.personalDetails?.gender || null,
-      address: profile.personalDetails?.currentAddress || profile.personalDetails?.permanentAddress || null,
-      province: profile.personalDetails?.province || null,
-      district: profile.personalDetails?.district || null,
-      municipality: profile.personalDetails?.municipality || null,
-      bio: profile.personalDetails?.areaLandmark || null,
+      university: profile.university || null,
+      personal_details: profile.personalDetails || null,
+      identity_verification: profile.identityVerification || null,
+      updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('profiles')
       .upsert(updateData as any, { onConflict: 'id' });
 
+    // If PostgREST schema cache complains about a missing column, strip that column and retry
+    while (error && error.message?.includes('schema cache')) {
+      const match = error.message.match(/Could not find the '([^']+)' column/);
+      if (match && match[1] && updateData[match[1]] !== undefined) {
+        delete updateData[match[1]];
+        const retryResult = await supabase
+          .from('profiles')
+          .upsert(updateData as any, { onConflict: 'id' });
+        error = retryResult.error;
+      } else {
+        break;
+      }
+    }
+
+    // Fallback to minimal core columns if schema differs
+    if (error && error.message?.includes('schema cache')) {
+      const minimalData: Record<string, any> = {
+        id: profile.id,
+        full_name: profile.name,
+        email: profile.email,
+        role: profile.role,
+      };
+      if (profile.phone) minimalData.phone = profile.phone;
+      if (profile.avatar) minimalData.avatar_url = profile.avatar;
+      const minimalRetry = await supabase
+        .from('profiles')
+        .upsert(minimalData as any, { onConflict: 'id' });
+      error = minimalRetry.error;
+    }
+
     if (error) {
-      console.warn('Error upserting profile in Supabase:', error.message);
+      console.warn('Supabase upsertProfile notice:', error.message);
       return false;
     }
 
@@ -172,8 +200,9 @@ export const subscribeToProfile = (
     return () => {};
   }
 
+  const channelName = `profile-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const channel = supabase
-    .channel(`profile-channel-${userId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       {

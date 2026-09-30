@@ -148,8 +148,9 @@ export const subscribeToBookings = (
 
   const column = role === 'owner' ? 'owner_id' : 'renter_id';
 
+  const channelName = `bookings-${role}-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const channel = supabase
-    .channel(`bookings-${role}-${userId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       {

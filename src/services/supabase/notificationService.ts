@@ -347,8 +347,9 @@ export const subscribeToNotifications = (
 ): (() => void) => {
   if (!isValidUUID(userId)) return () => {};
 
+  const channelName = `notifs-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const channel = supabase
-    .channel(`notifications-${userId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       {
@@ -407,8 +408,9 @@ export const subscribeToRealtimeNotifications = (
     });
 
   // Realtime subscription via Supabase Channel
+  const channelName = `notifs-live-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const channel = supabase
-    .channel(`notifs-live-${userId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       {

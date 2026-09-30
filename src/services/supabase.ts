@@ -432,8 +432,9 @@ export const subscribeToProfileInSupabase = (
   }
 
   try {
+    const channelName = `profile-rt-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const channel = supabase
-      .channel(`profile-${id}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

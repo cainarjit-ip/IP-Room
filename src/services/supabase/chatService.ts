@@ -127,8 +127,9 @@ export const subscribeToMessages = (
 ): (() => void) => {
   if (!isValidUUID(conversationId)) return () => {};
 
+  const channelName = `messages-${conversationId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const channel = supabase
-    .channel(`messages-${conversationId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       {
