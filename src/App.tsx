@@ -369,35 +369,78 @@ export default function App() {
   // Real-time Push Notifications (Supabase Realtime)
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // Subscribe to real-time Supabase push notifications only with authenticated valid UUID
+  // Subscribe to real-time notifications filtered strictly for the active role & recipient
   useEffect(() => {
-    if (!currentUser?.id || !isValidUUID(currentUser.id)) {
+    // 1. Initial load from role-specific local queue
+    try {
+      const queueKey = `iproom_notifs_${activeRole}`;
+      const cached = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      if (Array.isArray(cached)) {
+        setNotifications(cached);
+      }
+    } catch (e) {
       setNotifications([]);
-      return;
     }
 
-    const unsubscribeNotifications = subscribeToRealtimeNotifications(
-      activeRole,
-      currentUser.id,
-      incomingNotifs => {
-        if (incomingNotifs.length > 0) {
-          setNotifications(incomingNotifs);
+    // 2. Real-time Supabase push notifications if authenticated
+    let unsubscribeNotifications: (() => void) | null = null;
+    if (currentUser?.id && isValidUUID(currentUser.id)) {
+      unsubscribeNotifications = subscribeToRealtimeNotifications(
+        activeRole,
+        currentUser.id,
+        incomingNotifs => {
+          if (incomingNotifs.length > 0) {
+            // Filter by active role
+            const filtered = incomingNotifs.filter(
+              n => n.toRole === 'all' || n.toRole === activeRole
+            );
+            setNotifications(filtered);
+          }
         }
-      }
-    );
+      );
+    }
 
+    // 3. Foreground listener for real-time in-app broadcasts (strictly filtered for recipient)
     let unsubscribeForeground: (() => void) | null = null;
     setupForegroundFCMListener(incomingNotif => {
-      setNotifications(prev => [incomingNotif, ...prev.filter(n => n.id !== incomingNotif.id)]);
+      // Never notify the sender who triggered the message!
+      if (
+        currentUser?.id &&
+        incomingNotif.data?.senderId &&
+        incomingNotif.data.senderId === currentUser.id
+      ) {
+        return;
+      }
+      if (
+        currentUser?.name &&
+        incomingNotif.data?.senderName &&
+        incomingNotif.data.senderName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()
+      ) {
+        return;
+      }
+
+      // Check if notification is directed to the current active role or user ID
+      const matchesRole = incomingNotif.toRole === 'all' || incomingNotif.toRole === activeRole;
+      const matchesUser =
+        !incomingNotif.toUserId ||
+        incomingNotif.toUserId === 'all' ||
+        (currentUser?.id && incomingNotif.toUserId === currentUser.id);
+
+      if (matchesRole || matchesUser) {
+        setNotifications(prev => [
+          incomingNotif,
+          ...prev.filter(n => n.id !== incomingNotif.id),
+        ]);
+      }
     }).then(unsub => {
       if (unsub) unsubscribeForeground = unsub;
     });
 
     return () => {
-      unsubscribeNotifications();
+      if (unsubscribeNotifications) unsubscribeNotifications();
       if (unsubscribeForeground) unsubscribeForeground();
     };
-  }, [activeRole, currentUser?.id]);
+  }, [activeRole, currentUser?.id, currentUser?.name]);
 
   // Student user behavior & AI recommendation tracking
   const [userProfile, setUserProfile] = useState<UserBehaviorProfile>(getInitialBehaviorProfile());
@@ -1123,6 +1166,7 @@ export default function App() {
             onRejectBooking={handleRejectBooking}
             onViewContract={b => setViewingContractBooking(b)}
             onSelectRoom={handleSelectRoom}
+            onOpenChatWithRoom={r => setActiveChatRoom(r)}
           />
         )}
 

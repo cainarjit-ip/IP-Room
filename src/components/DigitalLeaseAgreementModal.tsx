@@ -109,7 +109,12 @@ export const DigitalLeaseAgreementModal: React.FC<DigitalLeaseAgreementModalProp
               <p><strong>Property Location:</strong> {booking.roomAddress}</p>
               <p><strong>Room / Unit:</strong> {booking.roomTitle}</p>
               <p><strong>Agreed Move-in Date:</strong> {booking.moveInDate}</p>
-              <p><strong>Tenancy Tenure:</strong> {booking.durationMonths} Months (Renewable upon mutual consent)</p>
+              <p>
+                <strong>Tenancy Tenure:</strong>{' '}
+                {booking.durationMonths === 0
+                  ? 'Month-to-Month Rolling Tenancy (महिनावारी निरन्तर / खुला अवधि - ३५ दिने पूर्व सूचनामा छाड्न सकिने)'
+                  : `${booking.durationMonths} ${booking.durationMonths === 1 ? 'Month' : 'Months'} (Renewable upon mutual consent)`}
+              </p>
             </div>
           </div>
 

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Language } from '../types';
 import { getTranslation } from '../data/translations';
-import { ShieldCheck, MapPin, Heart } from 'lucide-react';
+import { ShieldCheck, MapPin, Heart, Lock, FileText } from 'lucide-react';
+import { LegalModal } from './LegalModal';
 
 interface FooterProps {
   language: Language;
@@ -10,6 +11,13 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ language, onNavigateTab }) => {
   const t = getTranslation(language);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<'privacy' | 'terms'>('privacy');
+
+  const openLegal = (tab: 'privacy' | 'terms') => {
+    setLegalModalTab(tab);
+    setIsLegalModalOpen(true);
+  };
 
   return (
     <footer className="bg-slate-900 text-slate-300 border-t border-slate-800 mt-20">
@@ -83,6 +91,26 @@ export const Footer: React.FC<FooterProps> = ({ language, onNavigateTab }) => {
                   Student Renting Handbook
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => openLegal('privacy')}
+                  className="hover:text-emerald-400 transition flex items-center gap-1.5 text-left"
+                >
+                  <Lock className="w-3 h-3 text-emerald-500" />
+                  Privacy Policy (गोपनीयता नीति)
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => openLegal('terms')}
+                  className="hover:text-emerald-400 transition flex items-center gap-1.5 text-left"
+                >
+                  <FileText className="w-3 h-3 text-emerald-500" />
+                  Terms of Service (नियम तथा सर्तहरू)
+                </button>
+              </li>
               <li>Nepal Civil Code 2074 Tenancy Norms</li>
               <li>Khalti & eSewa Escrow Terms</li>
             </ul>
@@ -125,8 +153,24 @@ export const Footer: React.FC<FooterProps> = ({ language, onNavigateTab }) => {
 
         {/* Quiet Copyright Row */}
         <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <div>
-            © 2026 IP Room (नेपाल). All rights reserved.
+          <div className="flex flex-wrap items-center gap-3">
+            <span>© 2026 IP Room (नेपाल). All rights reserved.</span>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => openLegal('privacy')}
+              className="hover:text-slate-300 transition underline"
+            >
+              Privacy Policy
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => openLegal('terms')}
+              className="hover:text-slate-300 transition underline"
+            >
+              Terms of Service
+            </button>
           </div>
           <div className="flex items-center gap-1">
             <span>Built for students across Nepal with</span>
@@ -134,6 +178,12 @@ export const Footer: React.FC<FooterProps> = ({ language, onNavigateTab }) => {
           </div>
         </div>
       </div>
+
+      <LegalModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        defaultTab={legalModalTab}
+      />
     </footer>
   );
 };

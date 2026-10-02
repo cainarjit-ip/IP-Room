@@ -13,16 +13,11 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 2. HELPER FUNCTIONS & TRIGGER HANDLERS
 -- =========================================================================
 
--- Helper to check if current user is admin (checks JWT superadmin email and profiles.role)
+-- Helper to check if current user is admin strictly based on database role
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean AS $$
 BEGIN
-  -- 1. Fast check: superadmin email directly from auth JWT
-  IF LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'cainarjit@gmail.com' THEN
-    RETURN true;
-  END IF;
-
-  -- 2. Check profiles table for admin role
+  -- Check profiles table for admin role strictly based on authenticated UID
   RETURN EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
@@ -67,17 +62,12 @@ BEGIN
     NEW.verified := NEW.is_verified;
   END IF;
 
-  -- Always ensure cainarjit@gmail.com retains admin role
-  IF LOWER(NEW.email) = 'cainarjit@gmail.com' THEN
-    NEW.role := 'admin';
-  END IF;
-
   NEW.updated_at = now();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger: protect role modification from non-admin clients
+-- Trigger: protect role modification from non-admin clients (Anti-Spoofing)
 CREATE OR REPLACE FUNCTION public.protect_profile_role()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -143,15 +133,8 @@ BEGIN
     split_part(NEW.email, '@', 1)
   );
   
-  -- Role logic: cainarjit@gmail.com is promoted to admin; otherwise default to renter
-  IF LOWER(NEW.email) = 'cainarjit@gmail.com' THEN
-    v_role := 'admin';
-  ELSE
-    v_role := COALESCE(NEW.raw_user_meta_data->>'role', 'renter');
-    IF v_role NOT IN ('renter', 'owner', 'admin') THEN
-      v_role := 'renter';
-    END IF;
-  END IF;
+  -- Role logic: Default role is always 'renter'. Roles are managed strictly in database.
+  v_role := 'renter';
 
   v_avatar := COALESCE(
     NEW.raw_user_meta_data->>'avatar_url',
@@ -183,8 +166,8 @@ BEGIN
     v_role,
     v_avatar,
     v_avatar,
-    LOWER(NEW.email) = 'cainarjit@gmail.com',
-    LOWER(NEW.email) = 'cainarjit@gmail.com',
+    false,
+    false,
     NEW.raw_user_meta_data->>'university',
     now(),
     now()
@@ -264,10 +247,8 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- Promote cainarjit@gmail.com immediately if already registered
-UPDATE public.profiles
-SET role = 'admin', is_verified = true, verified = true
-WHERE LOWER(email) = 'cainarjit@gmail.com';
+-- Optional: Initial Admin Role Assignment (Run manually in SQL Editor for your chosen admin email)
+-- UPDATE public.profiles SET role = 'admin', is_verified = true, verified = true WHERE LOWER(email) = 'admin@yourdomain.com';
 
 -- -------------------------------------------------------------------------
 -- TABLE 2: ROOMS

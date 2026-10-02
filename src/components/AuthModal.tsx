@@ -21,6 +21,8 @@ import {
   sendPasswordResetEmail,
   getCurrentUserProfile,
 } from '../services/supabase';
+import { isValidNepalPhone, formatNepalPhone } from '../lib/validation';
+import { LegalModal } from './LegalModal';
 
 interface AuthModalProps {
   language: Language;
@@ -52,6 +54,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const [loadingProvider, setLoadingProvider] = useState<'google' | 'facebook' | 'email' | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Legal Modal
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<'privacy' | 'terms'>('privacy');
 
   // Handle Google Sign-in via Supabase OAuth
   const handleGoogleAuth = async () => {
@@ -133,12 +139,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
 
+        if (!isValidNepalPhone(phone)) {
+          setErrorMsg('Please enter a valid 10-digit Nepal mobile number (e.g. 9841234567 or +977 98XXXXXXXX).');
+          setLoadingProvider(null);
+          return;
+        }
+
+        const formattedPhone = formatNepalPhone(phone);
+
         const profile = await registerWithEmail(
           email.trim(),
           password,
           name.trim(),
           role,
-          phone.trim(),
+          formattedPhone,
           role === 'renter' ? university : undefined
         );
         onSuccess(profile);
@@ -511,6 +525,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             )}
 
+            {/* Terms & Privacy Policy Notice */}
+            <p className="text-[11px] text-center text-slate-500 pt-1 leading-relaxed">
+              By continuing, you agree to IP Room's{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalModalTab('terms');
+                  setIsLegalModalOpen(true);
+                }}
+                className="text-emerald-700 underline hover:text-emerald-800 font-semibold"
+              >
+                Terms of Service
+              </button>{' '}
+              and{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalModalTab('privacy');
+                  setIsLegalModalOpen(true);
+                }}
+                className="text-emerald-700 underline hover:text-emerald-800 font-semibold"
+              >
+                Privacy Policy
+              </button>
+              .
+            </p>
+
             {/* Submit Button */}
             <button
               type="submit"
@@ -542,6 +583,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </form>
         </div>
       </div>
+
+      <LegalModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        defaultTab={legalModalTab}
+      />
     </div>
   );
 };

@@ -53,10 +53,33 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     }
   }, []);
 
-  // Listen to in-app foreground notifications for floating toast banner
+  // Listen to in-app foreground notifications for floating toast banner (ONLY for recipient)
   useEffect(() => {
     const unsubscribe = addNotificationListener((notif) => {
-      // Show floating toast
+      // 1. NEVER show a notification to the sender who sent the message!
+      if (currentUser?.id && notif.data?.senderId && notif.data.senderId === currentUser.id) {
+        return;
+      }
+      if (
+        currentUser?.name &&
+        notif.data?.senderName &&
+        notif.data.senderName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()
+      ) {
+        return;
+      }
+
+      // 2. Only show toast if the notification matches the active viewing role or target user ID
+      const matchesRole = notif.toRole === 'all' || notif.toRole === activeRole;
+      const matchesUser =
+        !notif.toUserId ||
+        notif.toUserId === 'all' ||
+        (currentUser?.id && notif.toUserId === currentUser.id);
+
+      if (!matchesRole && !matchesUser) {
+        return;
+      }
+
+      // Show floating toast to recipient
       setActiveToast(notif);
 
       // Play soft web audio beep chime
@@ -86,7 +109,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeRole, currentUser?.id, currentUser?.name]);
 
   // Close dropdown on outside click
   useEffect(() => {

@@ -16,6 +16,7 @@ import {
   BarChart3,
   Layers,
   Home,
+  MessageSquare,
 } from 'lucide-react';
 
 interface OwnerDashboardProps {
@@ -28,6 +29,7 @@ interface OwnerDashboardProps {
   onRejectBooking: (bookingId: string) => void;
   onViewContract: (booking: BookingRequest) => void;
   onSelectRoom: (room: RoomListing) => void;
+  onOpenChatWithRoom?: (room: RoomListing) => void;
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
@@ -40,6 +42,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   onRejectBooking,
   onViewContract,
   onSelectRoom,
+  onOpenChatWithRoom,
 }) => {
   const t = getTranslation(language);
 
@@ -473,14 +476,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                     </div>
 
-                    {/* Public Listing Button */}
-                    <div className="p-4 pt-0">
+                    {/* Public Listing & Student Chat Buttons */}
+                    <div className="p-4 pt-0 flex gap-2">
                       <button
                         type="button"
                         onClick={() => onSelectRoom(room)}
-                        className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
+                        className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
                       >
-                        View Public Listing
+                        {language === 'np' ? 'कोठा हेर्नुहोस्' : 'View Listing'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
+                        className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                        title="Open student inquiries and reply to chat as Room Lister"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}</span>
                       </button>
                     </div>
 

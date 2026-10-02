@@ -101,6 +101,18 @@ export const sendPushNotification = async (
   // Broadcast to all active in-app listeners
   notifyInAppListeners(appNotif);
 
+  // Save to role-specific and user-specific local queue so recipient receives it when viewing their dashboard/role
+  try {
+    if (appNotif.toRole) {
+      const queueKey = `iproom_notifs_${appNotif.toRole}`;
+      const existing = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      const updated = [appNotif, ...existing.filter((n: any) => n.id !== appNotif.id)].slice(0, 30);
+      localStorage.setItem(queueKey, JSON.stringify(updated));
+    }
+  } catch (e) {
+    // ignore local storage error
+  }
+
   // Show native browser desktop notification if permission granted
   if (
     typeof window !== 'undefined' &&
@@ -225,7 +237,8 @@ export const notifyChatMessage = async (
   senderName: string,
   messageText: string,
   roomTitle: string,
-  roomId?: string
+  roomId?: string,
+  senderId?: string
 ): Promise<AppNotification> => {
   const shortMsg = messageText.length > 70 ? messageText.substring(0, 67) + '...' : messageText;
   return sendPushNotification({
@@ -237,6 +250,7 @@ export const notifyChatMessage = async (
     read: false,
     data: {
       roomId,
+      senderId,
       senderName,
     },
   });

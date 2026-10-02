@@ -151,14 +151,9 @@ export const ensureProfileAfterOAuthRedirect = async (): Promise<UserProfile | n
     }
 
     const user = session.user;
-    const isSuperAdmin = (user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
     let existing = await getProfileById(user.id);
 
     if (existing) {
-      if (isSuperAdmin && existing.role !== 'admin') {
-        existing = { ...existing, role: 'admin', verified: true };
-        await upsertProfile(existing);
-      }
       saveUserSession(existing);
 
       if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
@@ -167,9 +162,6 @@ export const ensureProfileAfterOAuthRedirect = async (): Promise<UserProfile | n
       return existing;
     }
 
-    const pendingRole = (localStorage.getItem('iproom_pending_oauth_role') as UserRole) || (isSuperAdmin ? 'admin' : 'renter');
-    localStorage.removeItem('iproom_pending_oauth_role');
-
     const meta: any = user.user_metadata || {};
     const fullName = meta.full_name || meta.name || user.email?.split('@')[0] || 'IP Room User';
     const profile: UserProfile = {
@@ -177,25 +169,26 @@ export const ensureProfileAfterOAuthRedirect = async (): Promise<UserProfile | n
       name: fullName,
       email: user.email || '',
       phone: meta.phone || '+977 98XXXXXXXX',
-      role: isSuperAdmin ? 'admin' : pendingRole,
+      role: 'renter', // Default role in database; elevated only via database RLS/triggers
       avatar:
         meta.avatar_url ||
         meta.picture ||
         `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
-      verified: isSuperAdmin || pendingRole === 'renter',
-      citizenshipVerified: pendingRole === 'owner',
-      university: pendingRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
-      studentIdVerified: pendingRole === 'renter',
+      verified: false,
+      citizenshipVerified: false,
+      university: undefined,
+      studentIdVerified: false,
     };
 
     await upsertProfile(profile);
-    saveUserSession(profile);
+    const authoritative = (await getProfileById(user.id)) || profile;
+    saveUserSession(authoritative);
 
     if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    return profile;
+    return authoritative;
   } catch (err) {
     console.warn('Error during ensureProfileAfterOAuthRedirect:', err);
     return null;
@@ -324,26 +317,22 @@ export const signInWithEmail = async (
         return { user: existingProfile, error: null };
       }
 
-      const isCainarjitAdmin = (data.user.email || email).trim().toLowerCase() === 'cainarjit@gmail.com';
-      const resolvedRole: UserRole = isCainarjitAdmin
-        ? 'admin'
-        : ((data.user.user_metadata?.role as UserRole) || 'renter');
-
       // Fallback construct if profile row not yet created
       const fallbackProfile: UserProfile = {
         id: data.user.id,
         name: data.user.user_metadata?.full_name || email.split('@')[0],
         email: data.user.email || email,
         phone: data.user.user_metadata?.phone || '+977 98XXXXXXXX',
-        role: resolvedRole,
+        role: 'renter',
         avatar:
           data.user.user_metadata?.avatar_url ||
           `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(email)}`,
-        verified: isCainarjitAdmin,
+        verified: false,
       };
 
       await upsertProfile(fallbackProfile);
-      return { user: fallbackProfile, error: null };
+      const authRecord = (await getProfileById(data.user.id)) || fallbackProfile;
+      return { user: authRecord, error: null };
     }
 
     return { user: null, error: 'User could not be found.' };
@@ -404,24 +393,23 @@ export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
     if (error || !session?.user) return null;
     let profile = await getProfileById(session.user.id);
     if (!profile) {
-      const isSuperAdmin = (session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
       const meta: any = session.user.user_metadata || {};
       const fullName = meta.full_name || meta.name || session.user.email?.split('@')[0] || 'IP Room User';
-      const assignedRole: UserRole = isSuperAdmin ? 'admin' : ((meta.role as UserRole) || 'renter');
 
       profile = {
         id: session.user.id,
         name: fullName,
         email: session.user.email || '',
         phone: meta.phone || '+977 98XXXXXXXX',
-        role: assignedRole,
+        role: 'renter',
         avatar: meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
-        verified: isSuperAdmin,
+        verified: false,
         citizenshipVerified: false,
-        university: assignedRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+        university: undefined,
         studentIdVerified: false,
       };
       await upsertProfile(profile);
+      profile = (await getProfileById(session.user.id)) || profile;
     }
     return profile;
   } catch (err) {
@@ -440,29 +428,24 @@ export const onAuthStateChange = (
     if (session?.user) {
       let profile = await getProfileById(session.user.id);
       if (!profile) {
-        const isSuperAdmin = (session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com';
-        const pendingRole = (localStorage.getItem('iproom_pending_oauth_role') as UserRole) || (isSuperAdmin ? 'admin' : 'renter');
         const meta: any = session.user.user_metadata || {};
         const fullName = meta.full_name || meta.name || session.user.email?.split('@')[0] || 'IP Room User';
-        const assignedRole: UserRole = isSuperAdmin ? 'admin' : (meta.role as UserRole) || pendingRole;
 
         profile = {
           id: session.user.id,
           name: fullName,
           email: session.user.email || '',
           phone: meta.phone || '+977 98XXXXXXXX',
-          role: assignedRole,
+          role: 'renter',
           avatar: meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
-          verified: isSuperAdmin,
+          verified: false,
           citizenshipVerified: false,
-          university: assignedRole === 'renter' ? 'Tribhuvan University (Central Campus)' : undefined,
+          university: undefined,
           studentIdVerified: false,
         };
         // Persist profile asynchronously in background
-        upsertProfile(profile).catch(e => console.warn('Background profile sync notice:', e));
-      } else if ((session.user.email || '').trim().toLowerCase() === 'cainarjit@gmail.com' && profile.role !== 'admin') {
-        profile = { ...profile, role: 'admin', verified: true };
-        upsertProfile(profile).catch(e => console.warn('Background profile sync notice:', e));
+        await upsertProfile(profile);
+        profile = (await getProfileById(session.user.id)) || profile;
       }
       callback(profile);
     } else if (event === 'SIGNED_OUT') {

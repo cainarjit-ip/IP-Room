@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { RoomListing, Language, BookingRequest, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
-import { X, ShieldCheck, CheckCircle2, Lock, ArrowRight, Wallet, CreditCard, Banknote, Calendar } from 'lucide-react';
+import { X, ShieldCheck, CheckCircle2, Lock, ArrowRight, Wallet, CreditCard, Banknote, Calendar, AlertCircle } from 'lucide-react';
 import { recordPayment, generateUUID, isValidUUID } from '../services/supabase';
+import { isValidNepalPhone } from '../lib/validation';
 
 interface BookingPaymentModalProps {
   room: RoomListing | null;
@@ -26,6 +27,8 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
   // Form states
   const [moveInDate, setMoveInDate] = useState('2026-10-01');
   const [durationMonths, setDurationMonths] = useState(3);
+  const [isCustomDuration, setIsCustomDuration] = useState(false);
+  const [isOpenEnded, setIsOpenEnded] = useState(false);
   const [tenantName, setTenantName] = useState(currentUser?.name || 'Aayush Sharma');
   const [tenantPhone, setTenantPhone] = useState(currentUser?.phone || '+977 9841998877');
   const [tenantEmail, setTenantEmail] = useState(currentUser?.email || 'aayush.sharma@gmail.com');
@@ -38,9 +41,10 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [completedBooking, setCompletedBooking] = useState<BookingRequest | null>(null);
+  const [phoneError, setPhoneError] = useState('');
 
   // Discount calculation
-  const discountMultiplier = durationMonths === 12 ? 0.90 : durationMonths === 6 ? 0.95 : 1.0;
+  const discountMultiplier = durationMonths >= 12 ? 0.90 : durationMonths >= 6 ? 0.95 : 1.0;
   const effectiveMonthlyRent = Math.round(room.price * discountMultiplier);
   const securityDeposit = room.deposit;
   const platformFee = 0; // Free student promotion
@@ -48,6 +52,13 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
 
   const handleProcessPayment = (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError('');
+
+    if (!isValidNepalPhone(tenantPhone)) {
+      setPhoneError('Please enter a valid Nepal 10-digit mobile number (e.g. 9841234567 or +977 9841234567)');
+      return;
+    }
+
     setIsProcessing(true);
 
     setTimeout(() => {
@@ -88,10 +99,10 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-      <div className="relative bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6">
+      <div className="relative bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto">
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-slate-900 text-white">
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900 text-white shrink-0">
           <div className="flex items-center gap-2">
             <Lock className="w-5 h-5 text-emerald-400" />
             <div>
@@ -114,7 +125,7 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
 
         {/* Modal Content */}
         {!completedBooking ? (
-          <form onSubmit={handleProcessPayment} className="p-5 sm:p-6 space-y-6">
+          <form onSubmit={handleProcessPayment} className="p-4 sm:p-6 space-y-5 sm:space-y-6 overflow-y-auto flex-1 overscroll-contain">
             {/* Selected Room Summary */}
             <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
               <img
@@ -152,18 +163,78 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.durationLabel}
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>{t.durationLabel}</span>
+                  {!isOpenEnded && durationMonths >= 6 && (
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                      {durationMonths >= 12 ? '10% Discount' : '5% Discount'}
+                    </span>
+                  )}
+                  {isOpenEnded && (
+                    <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                      {language === 'np' ? 'खुला / लचिलो' : 'Open-Ended'}
+                    </span>
+                  )}
                 </label>
                 <select
-                  value={durationMonths}
-                  onChange={e => setDurationMonths(Number(e.target.value))}
+                  value={isOpenEnded ? 'open_ended' : isCustomDuration ? 'custom' : durationMonths}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === 'open_ended') {
+                      setIsOpenEnded(true);
+                      setIsCustomDuration(false);
+                      setDurationMonths(0);
+                    } else if (val === 'custom') {
+                      setIsOpenEnded(false);
+                      setIsCustomDuration(true);
+                      if (durationMonths === 0) setDurationMonths(1);
+                    } else {
+                      setIsOpenEnded(false);
+                      setIsCustomDuration(false);
+                      setDurationMonths(Number(val));
+                    }
+                  }}
                   className="w-full text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
+                  <option value="open_ended">🔄 {t.durationOpenEnded}</option>
+                  <option value={1}>{t.duration1Month}</option>
+                  <option value={2}>{t.duration2Months}</option>
                   <option value={3}>{t.duration3Months}</option>
                   <option value={6}>{t.duration6Months}</option>
+                  <option value={9}>{t.duration9Months}</option>
                   <option value={12}>{t.duration12Months}</option>
+                  <option value="custom">⚡ {t.durationCustom}</option>
                 </select>
+
+                {isOpenEnded && (
+                  <div className="mt-2 p-2.5 bg-blue-50/80 border border-blue-200 rounded-lg text-xs space-y-1">
+                    <div className="font-bold text-blue-900 flex items-center gap-1.5 text-[11px]">
+                      <span>🔄 {language === 'np' ? 'अनिश्चित / खुला अवधि (Month-to-Month Tenancy)' : 'Month-to-Month Rolling Tenancy'}</span>
+                    </div>
+                    <p className="text-[10.5px] text-blue-800 leading-relaxed">
+                      {t.openEndedNotice}
+                    </p>
+                  </div>
+                )}
+
+                {isCustomDuration && (
+                  <div className="mt-2 p-2 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-center gap-2">
+                    <label className="text-[11px] font-bold text-emerald-900 whitespace-nowrap">
+                      {language === 'np' ? 'लचिलो महिना:' : 'Flexible Months:'}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={36}
+                      value={durationMonths}
+                      onChange={e => setDurationMonths(Math.max(1, Math.min(36, Number(e.target.value) || 1)))}
+                      className="w-20 px-2 py-1 text-xs font-bold text-center bg-white border border-emerald-300 rounded shadow-xs focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <span className="text-[10px] text-emerald-700">
+                      {language === 'np' ? 'महिना (१-३६ सम्म)' : 'months (1-36)'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -189,9 +260,20 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
                     type="text"
                     required
                     value={tenantPhone}
-                    onChange={e => setTenantPhone(e.target.value)}
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-mono"
+                    onChange={e => {
+                      setTenantPhone(e.target.value);
+                      if (phoneError) setPhoneError('');
+                    }}
+                    className={`w-full p-2 bg-slate-50 border rounded-lg font-mono ${
+                      phoneError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-200'
+                    }`}
                   />
+                  {phoneError && (
+                    <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      {phoneError}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-slate-600 block mb-1">Email Address</label>
@@ -219,7 +301,11 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/80 space-y-2 text-xs">
               <div className="font-bold text-slate-900 mb-1">{t.paymentBreakdown}</div>
               <div className="flex justify-between text-slate-600">
-                <span>{t.firstMonthRent} ({durationMonths >= 6 ? `${durationMonths === 12 ? '10%' : '5%'} Discount Applied` : 'Standard'}):</span>
+                <span>
+                  {t.firstMonthRent} ({isOpenEnded
+                    ? (language === 'np' ? 'महिनावारी निरन्तर / खुला अवधि' : 'Month-to-Month Rolling')
+                    : `${durationMonths} ${durationMonths === 1 ? (language === 'np' ? 'महिना' : 'Month') : (language === 'np' ? 'महिना' : 'Months')}${durationMonths >= 6 ? ` · ${durationMonths >= 12 ? '10%' : '5%'} Discount` : ''}`}):
+                </span>
                 <span className="font-mono tabular-nums font-semibold">रु. {effectiveMonthlyRent.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between text-slate-600">
@@ -368,7 +454,7 @@ export const BookingPaymentModal: React.FC<BookingPaymentModalProps> = ({
           </form>
         ) : (
           /* Booking Confirmation & Contract Ready */
-          <div className="p-6 sm:p-8 text-center space-y-5">
+          <div className="p-6 sm:p-8 text-center space-y-5 overflow-y-auto flex-1">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="w-10 h-10" />
             </div>

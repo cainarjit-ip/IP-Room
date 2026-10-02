@@ -150,7 +150,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <p className="text-slate-600 text-sm leading-relaxed">
             {language === 'np'
               ? 'यो पृष्ठ केवल अधिकृत प्रशासकहरूका लागि मात्र उपलब्ध छ। कोठा अनुमोदन, विवाद समाधान, र प्लेटफर्म अडिट गर्न कृपया प्रशासक खाताबाट लगइन गर्नुहोस्।'
-              : 'This portal is restricted to authorized platform administrators. Please sign in with administrator credentials (e.g. cainarjit@gmail.com) to moderate listings and manage disputes.'}
+              : 'This portal is restricted to authorized platform administrators. Please sign in with administrator credentials to moderate listings and manage disputes.'}
           </p>
         </div>
       </div>
