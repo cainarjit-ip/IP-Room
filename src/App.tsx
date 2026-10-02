@@ -419,19 +419,25 @@ export default function App() {
         return;
       }
 
-      // Check if notification is directed to the current active role or user ID
-      const matchesRole = incomingNotif.toRole === 'all' || incomingNotif.toRole === activeRole;
-      const matchesUser =
-        !incomingNotif.toUserId ||
-        incomingNotif.toUserId === 'all' ||
-        (currentUser?.id && incomingNotif.toUserId === currentUser.id);
-
-      if (matchesRole || matchesUser) {
-        setNotifications(prev => [
-          incomingNotif,
-          ...prev.filter(n => n.id !== incomingNotif.id),
-        ]);
+      // 2. Notification must strictly match the recipient's active role
+      if (incomingNotif.toRole !== 'all' && incomingNotif.toRole !== activeRole) {
+        return;
       }
+
+      // 3. If directed to a specific user ID, ensure it matches current user
+      if (
+        incomingNotif.toUserId &&
+        incomingNotif.toUserId !== 'all' &&
+        currentUser?.id &&
+        incomingNotif.toUserId !== currentUser.id
+      ) {
+        return;
+      }
+
+      setNotifications(prev => [
+        incomingNotif,
+        ...prev.filter(n => n.id !== incomingNotif.id),
+      ]);
     }).then(unsub => {
       if (unsub) unsubscribeForeground = unsub;
     });

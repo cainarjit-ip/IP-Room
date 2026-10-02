@@ -68,14 +68,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         return;
       }
 
-      // 2. Only show toast if the notification matches the active viewing role or target user ID
-      const matchesRole = notif.toRole === 'all' || notif.toRole === activeRole;
-      const matchesUser =
-        !notif.toUserId ||
-        notif.toUserId === 'all' ||
-        (currentUser?.id && notif.toUserId === currentUser.id);
+      // 2. Notification must strictly match the recipient's active role
+      if (notif.toRole !== 'all' && notif.toRole !== activeRole) {
+        return;
+      }
 
-      if (!matchesRole && !matchesUser) {
+      // 3. If directed to a specific user ID, ensure it matches current user
+      if (
+        notif.toUserId &&
+        notif.toUserId !== 'all' &&
+        currentUser?.id &&
+        notif.toUserId !== currentUser.id
+      ) {
         return;
       }
 

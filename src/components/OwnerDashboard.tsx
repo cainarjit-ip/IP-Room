@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RoomListing, BookingRequest, Language, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
 import { OwnerAnalytics } from './OwnerAnalytics';
+import {
+  getAllRoomChatSummaries,
+  subscribeToLiveRoomChat,
+} from '../services/supabase/chatService';
 import {
   PlusCircle,
   Building,
@@ -51,9 +55,31 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const t = getTranslation(language);
 
   const [activeOwnerTab, setActiveOwnerTab] = useState<
-    'listings' | 'analytics'
+    'listings' | 'messages' | 'analytics'
   >('listings');
   const [roomToDelete, setRoomToDelete] = useState<RoomListing | null>(null);
+
+  // Live chat inquiries summary across all listings
+  const [chatSummaries, setChatSummaries] = useState(() => getAllRoomChatSummaries());
+
+  useEffect(() => {
+    // Initial fetch
+    setChatSummaries(getAllRoomChatSummaries());
+
+    // Subscribe to real-time chat updates across all rooms
+    const unsubscribe = subscribeToLiveRoomChat('*', () => {
+      setChatSummaries(getAllRoomChatSummaries());
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const totalChatMessages = Object.values(chatSummaries).reduce(
+    (sum, item) => sum + (item.total || 0),
+    0
+  );
 
   // Landlord's listings
   const myRooms = rooms;
@@ -145,6 +171,36 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             </span>
           </button>
 
+          {/* Inquiries & Live Chat Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveOwnerTab('messages')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition ${
+              activeOwnerTab === 'messages'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-emerald-600" />
+
+            <span>
+              {language === 'np'
+                ? 'विद्यार्थी च्याट तथा सोधपुछ'
+                : 'Student Inquiries & Chats'}
+            </span>
+
+            {totalChatMessages > 0 ? (
+              <span className="text-[10px] bg-emerald-600 text-white font-mono px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                <span>{totalChatMessages}</span>
+              </span>
+            ) : (
+              <span className="text-[10px] bg-slate-200 text-slate-700 font-mono px-1.5 py-0.5 rounded-full font-semibold">
+                0
+              </span>
+            )}
+          </button>
+
           {/* Analytics Tab */}
           <button
             type="button"
@@ -170,8 +226,121 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         </div>
       </div>
 
-      {/* Analytics */}
-      {activeOwnerTab === 'analytics' ? (
+      {/* Tab Panels */}
+      {activeOwnerTab === 'messages' ? (
+        <div className="space-y-6">
+          <div className="bg-emerald-900 text-white rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl border border-emerald-800">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="font-bold text-xs text-emerald-300 uppercase tracking-wider">
+                  {language === 'np' ? 'प्रत्यक्ष कुराकानी ड्यासबोर्ड' : 'Live Real-time Inquiries'}
+                </span>
+                <span className="text-emerald-500">·</span>
+                <span className="text-xs text-emerald-200">
+                  {language === 'np' ? 'आधिकारिक घरधनी खाता' : 'Official Room Lister Portal'}
+                </span>
+              </div>
+              <h2 className="font-display font-extrabold text-2xl text-white">
+                {language === 'np' ? 'विद्यार्थी सोधपुछ तथा लाइभ च्याट' : 'Student Chats & Live Inquiries'}
+              </h2>
+              <p className="mt-1 text-xs sm:text-sm text-emerald-100 max-w-2xl leading-relaxed">
+                {language === 'np'
+                  ? 'विद्यार्थीहरूले तपाईंका कोठाबारे सोधेका सबै प्रत्यक्ष प्रश्नहरू यहाँ तत्काल हेर्नुहोस्। कुनै पनि कोठाको च्याट खोलेर आफ्नै आधिकारिक आइडीबाट सिधै जवाफ दिनुहोस्।'
+                  : 'Monitor live inquiries from students across all your room listings in real-time. Open any room chat to reply directly as the verified room lister.'}
+              </p>
+            </div>
+
+            <div className="bg-emerald-950/80 border border-emerald-700/80 rounded-2xl p-4 text-center shrink-0 min-w-[160px]">
+              <span className="block text-3xl font-extrabold font-mono text-emerald-400">
+                {totalChatMessages}
+              </span>
+              <span className="text-xs font-semibold text-emerald-200 mt-0.5 block">
+                {language === 'np' ? 'कुल च्याट सन्देश' : 'Total Messages'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {myRooms.map((room) => {
+              const summary = chatSummaries[room.id];
+              const msgCount = summary?.total || 0;
+              const lastMsg = summary?.lastMessage;
+
+              return (
+                <div
+                  key={room.id}
+                  className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center gap-3 mb-4">
+                      <img
+                        src={room.images[0]}
+                        alt={room.title}
+                        className="w-14 h-14 rounded-xl object-cover border border-slate-200 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-slate-900 truncate">
+                            {language === 'np' ? room.titleNp : room.title}
+                          </span>
+                          {msgCount > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              <span>{msgCount} Live</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
+                              0 {language === 'np' ? 'सन्देश' : 'Msgs'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          रु. {room.price.toLocaleString('en-IN')}/mo · {room.location.municipality}
+                        </p>
+                      </div>
+                    </div>
+
+                    {lastMsg ? (
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/70 mb-4 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span className="font-bold text-slate-700">
+                            {lastMsg.senderName} ({lastMsg.senderRole === 'owner' ? (language === 'np' ? 'तपाईं' : 'You') : (language === 'np' ? 'विद्यार्थी' : 'Student')})
+                          </span>
+                          <span className="font-mono">{lastMsg.timestamp}</span>
+                        </div>
+                        <p className="text-slate-800 line-clamp-2 text-xs italic">
+                          "{lastMsg.text}"
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200 mb-4 text-xs text-slate-400 text-center">
+                        {language === 'np'
+                          ? 'अहिलेसम्म कुनै सन्देश छैन। विद्यार्थीले सोधपुछ गर्दा यहाँ देखिनेछ।'
+                          : 'No inquiries yet. Real-time messages will appear here.'}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
+                    className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+                    title={language === 'np' ? 'विद्यार्थीसँग च्याट खोल्नुहोस् र जवाफ दिनुहोस्' : 'Open live chat with students and reply'}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>
+                      {language === 'np'
+                        ? 'च्याट खोल्नुहोस् र जवाफ दिनुहोस्'
+                        : 'Open Live Chat & Reply'}
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : activeOwnerTab === 'analytics' ? (
         <OwnerAnalytics
           rooms={rooms}
           bookings={bookings}
@@ -506,11 +675,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
-                          className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                          className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                            chatSummaries[room.id]?.total
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          }`}
                           title="Open student inquiries and reply to chat as Room Lister"
                         >
-                          <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}</span>
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>
+                            {language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}
+                            {chatSummaries[room.id]?.total ? ` (${chatSummaries[room.id].total})` : ''}
+                          </span>
                         </button>
                       </div>
 
