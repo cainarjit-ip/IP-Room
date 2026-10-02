@@ -8,6 +8,12 @@ import {
   DisputeTicket,
 } from '../types';
 import { supabase, isValidUUID, stringToUUID, getAuthenticatedSessionUser } from '../lib/supabase';
+import {
+  getLocalStoredRooms,
+  persistRoomLocally,
+  removeRoomLocally,
+  syncAllRoomsLocally,
+} from './roomStorage';
 
 // Re-export all modular Supabase services
 export * from './supabase/index';
@@ -477,25 +483,31 @@ export const fetchRoomsFromSupabase = async (): Promise<RoomListing[]> => {
     console.warn('Supabase fetchRooms exception:', err?.message);
   }
 
-  // Retrieve any locally published rooms for instant display
+  // Retrieve locally published rooms from both IndexedDB and LocalStorage
   let localList: RoomListing[] = [];
   try {
-    const stored = localStorage.getItem('iproom_local_rooms');
-    if (stored) {
-      localList = JSON.parse(stored);
-    }
+    localList = await getLocalStoredRooms();
   } catch (e) {}
 
-  // Deduplicate by room id: local room overlay takes priority if newer
+  // Deduplicate by room id: keep all rooms, with local updates preserved
   const mergedMap = new Map<string, RoomListing>();
   remoteList.forEach(r => mergedMap.set(r.id, r));
   localList.forEach(r => mergedMap.set(r.id, r));
 
-  return Array.from(mergedMap.values());
+  const allRooms = Array.from(mergedMap.values());
+  // Sync back to local persistent store so all rooms are readily available offline
+  if (allRooms.length > 0) {
+    syncAllRoomsLocally(allRooms).catch(() => {});
+  }
+
+  return allRooms;
 };
 
 export const saveRoomToSupabase = async (room: RoomListing): Promise<boolean> => {
   try {
+    // 1. Persist to reliable local storage (IndexedDB + LocalStorage) immediately
+    await persistRoomLocally(room);
+
     let ownerId = isValidUUID(room.owner?.id) ? room.owner.id : null;
     if (!ownerId) {
       const authUser = await getAuthenticatedSessionUser();
@@ -512,20 +524,7 @@ export const saveRoomToSupabase = async (room: RoomListing): Promise<boolean> =>
       }
     }
 
-    // Persist to local cache immediately so room shows up instantly without waiting
-    try {
-      const stored = localStorage.getItem('iproom_local_rooms');
-      const list: RoomListing[] = stored ? JSON.parse(stored) : [];
-      const idx = list.findIndex(r => r.id === room.id);
-      if (idx >= 0) {
-        list[idx] = room;
-      } else {
-        list.unshift(room);
-      }
-      localStorage.setItem('iproom_local_rooms', JSON.stringify(list));
-    } catch (e) {}
-
-    // Save to remote Supabase Postgres database
+    // 2. Save to remote Supabase Postgres database if available
     const { error } = await supabase.from('rooms').upsert(row as any, { onConflict: 'id' });
     if (error) {
       console.warn('Supabase saveRoom notice:', error.message);
@@ -543,6 +542,22 @@ export const updateRoomStatusInSupabase = async (
   newStatus: ListingStatus,
   extraFields: Record<string, any> = {}
 ): Promise<void> => {
+  // Update local persistent copy
+  try {
+    const localRooms = await getLocalStoredRooms();
+    const target = localRooms.find(r => r.id === roomId);
+    if (target) {
+      const updatedRoom: RoomListing = {
+        ...target,
+        status: newStatus,
+        rejectionReason: extraFields.rejectionReason ?? target.rejectionReason,
+        moderatedAt: extraFields.moderatedAt ?? target.moderatedAt,
+        moderatedBy: extraFields.moderatedBy ?? target.moderatedBy,
+      };
+      await persistRoomLocally(updatedRoom);
+    }
+  } catch (e) {}
+
   if (!isValidUUID(roomId)) return;
 
   try {
@@ -570,6 +585,11 @@ export const updateRoomStatusInSupabase = async (
 };
 
 export const deleteRoomFromSupabase = async (roomId: string): Promise<void> => {
+  // Permanently remove from local storage (IndexedDB + LocalStorage)
+  try {
+    await removeRoomLocally(roomId);
+  } catch (e) {}
+
   if (!isValidUUID(roomId)) return;
 
   try {

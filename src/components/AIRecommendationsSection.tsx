@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { RoomListing, AIRecommendation, Language, UserBehaviorProfile } from '../types';
 import { getTranslation } from '../data/translations';
-import { Sparkles, Brain, CheckCircle2, ChevronRight, School, Droplets, Zap, ArrowRight } from 'lucide-react';
+import { Sparkles, Brain, CheckCircle2, ChevronRight, School, Droplets, Zap, ArrowRight, ChevronDown } from 'lucide-react';
 
 interface AIRecommendationsSectionProps {
   recommendedRooms: (RoomListing & { recommendation: AIRecommendation })[];
@@ -21,11 +21,12 @@ export const AIRecommendationsSection: React.FC<AIRecommendationsSectionProps> =
   onAdjustPreferences,
 }) => {
   const t = getTranslation(language);
+  const [showAllMatches, setShowAllMatches] = useState(false);
 
-  // Take top 3 best matching rooms
-  const topMatches = recommendedRooms.slice(0, 3);
+  if (recommendedRooms.length === 0) return null;
 
-  if (topMatches.length === 0) return null;
+  // Show up to 6 by default, or all when expanded
+  const displayMatches = showAllMatches ? recommendedRooms : recommendedRooms.slice(0, 6);
 
   return (
     <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 rounded-2xl p-6 sm:p-8 text-white border border-emerald-900/60 shadow-xl space-y-6">
@@ -38,6 +39,9 @@ export const AIRecommendationsSection: React.FC<AIRecommendationsSectionProps> =
             </span>
             <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">
               AI Smart Recommendation Engine · नेपाल
+            </span>
+            <span className="text-[10px] font-bold bg-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40">
+              {recommendedRooms.length} Matches Found
             </span>
           </div>
           <h2 className="font-display font-bold text-xl sm:text-2xl text-white">
@@ -52,7 +56,7 @@ export const AIRecommendationsSection: React.FC<AIRecommendationsSectionProps> =
           <button
             type="button"
             onClick={onAdjustPreferences}
-            className="text-xs font-semibold text-emerald-300 hover:text-white bg-white/10 hover:bg-white/20 px-3.5 py-2 rounded-xl transition border border-white/10 whitespace-nowrap self-start sm:self-auto"
+            className="text-xs font-semibold text-emerald-300 hover:text-white bg-white/10 hover:bg-white/20 px-3.5 py-2 rounded-xl transition border border-white/10 whitespace-nowrap self-start sm:self-auto cursor-pointer"
           >
             Adjust Target Campus & Budget
           </button>
@@ -60,8 +64,8 @@ export const AIRecommendationsSection: React.FC<AIRecommendationsSectionProps> =
       </div>
 
       {/* Recommended Rooms Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {topMatches.map(room => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {displayMatches.map(room => (
           <div
             key={room.id}
             className="bg-slate-900/90 rounded-xl overflow-hidden border border-emerald-500/30 hover:border-emerald-400/70 transition-all duration-200 flex flex-col justify-between group shadow-lg"
@@ -142,6 +146,31 @@ export const AIRecommendationsSection: React.FC<AIRecommendationsSectionProps> =
           </div>
         ))}
       </div>
+
+      {recommendedRooms.length > 6 && (
+        <div className="text-center pt-2">
+          <button
+            type="button"
+            onClick={() => setShowAllMatches(!showAllMatches)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition border border-white/10 cursor-pointer"
+          >
+            <span>
+              {showAllMatches
+                ? language === 'np'
+                  ? 'कम सिफारिसहरू देखाउनुहोस्'
+                  : 'Show Fewer Matches'
+                : language === 'np'
+                ? `सबै ${recommendedRooms.length} वटा सिफारिस गरिएका कोठा हेर्नुहोस्`
+                : `View All ${recommendedRooms.length} Recommended Rooms`}
+            </span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${
+                showAllMatches ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
