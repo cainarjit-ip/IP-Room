@@ -942,6 +942,27 @@ export default function App() {
     });
   };
 
+  // Room Lister: Delete own room listing
+  const handleOwnerDeleteRoom = (roomId: string) => {
+    const target = rooms.find(r => r.id === roomId);
+    if (!target) return;
+
+    const updated = rooms.filter(r => r.id !== roomId);
+    persistRooms(updated);
+
+    deleteRoomFromSupabase(roomId);
+
+    if (selectedRoomDetail?.id === roomId) {
+      setSelectedRoomDetail(null);
+    }
+    if (activeChatRoom?.id === roomId) {
+      setActiveChatRoom(null);
+    }
+    if (bookingRoom?.id === roomId) {
+      setBookingRoom(null);
+    }
+  };
+
   // Admin: Resolve dispute
   const handleResolveDispute = (disputeId: string, notes: string) => {
     if (!isValidUUID(disputeId)) return;
@@ -1167,6 +1188,7 @@ export default function App() {
             onViewContract={b => setViewingContractBooking(b)}
             onSelectRoom={handleSelectRoom}
             onOpenChatWithRoom={r => setActiveChatRoom(r)}
+            onDeleteRoom={handleOwnerDeleteRoom}
           />
         )}
 

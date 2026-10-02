@@ -17,6 +17,8 @@ import {
   Layers,
   Home,
   MessageSquare,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface OwnerDashboardProps {
@@ -30,6 +32,7 @@ interface OwnerDashboardProps {
   onViewContract: (booking: BookingRequest) => void;
   onSelectRoom: (room: RoomListing) => void;
   onOpenChatWithRoom?: (room: RoomListing) => void;
+  onDeleteRoom?: (roomId: string) => void;
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
@@ -43,12 +46,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   onViewContract,
   onSelectRoom,
   onOpenChatWithRoom,
+  onDeleteRoom,
 }) => {
   const t = getTranslation(language);
 
   const [activeOwnerTab, setActiveOwnerTab] = useState<
     'listings' | 'analytics'
   >('listings');
+  const [roomToDelete, setRoomToDelete] = useState<RoomListing | null>(null);
 
   // Landlord's listings
   const myRooms = rooms;
@@ -408,12 +413,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                     {/* Room Image */}
                     <div className="relative">
-
                       <img
                         src={room.images[0]}
                         alt={room.title}
                         className="w-full h-36 object-cover"
                       />
+
+                      {/* Quick Delete Listing Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRoomToDelete(room);
+                        }}
+                        className="absolute top-2 left-2 p-1.5 rounded-lg bg-slate-900/75 hover:bg-rose-600 text-white backdrop-blur-xs transition shadow-xs cursor-pointer"
+                        title={language === 'np' ? 'यो कोठा लिस्टिङ हटाउनुहोस्' : 'Delete / Remove Room Listing'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
 
                       {/* Status Badge */}
                       <div className="absolute top-2 right-2">
@@ -476,23 +493,35 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                     </div>
 
-                    {/* Public Listing & Student Chat Buttons */}
-                    <div className="p-4 pt-0 flex gap-2">
+                    {/* Public Listing, Chat & Remove Listing Buttons */}
+                    <div className="p-4 pt-0 space-y-2">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectRoom(room)}
+                          className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
+                        >
+                          {language === 'np' ? 'कोठा हेर्नुहोस्' : 'View Listing'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
+                          className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                          title="Open student inquiries and reply to chat as Room Lister"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}</span>
+                        </button>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => onSelectRoom(room)}
-                        className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
+                        onClick={() => setRoomToDelete(room)}
+                        className="w-full py-1.5 bg-rose-50/60 hover:bg-rose-100/80 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        title={language === 'np' ? 'यो कोठा लिस्टिङ हटाउनुहोस्' : 'Remove this room listing'}
                       >
-                        {language === 'np' ? 'कोठा हेर्नुहोस्' : 'View Listing'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
-                        className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
-                        title="Open student inquiries and reply to chat as Room Lister"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}</span>
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>{language === 'np' ? 'कोठा हटाउनुहोस् (Delete Listing)' : 'Remove Room Listing'}</span>
                       </button>
                     </div>
 
@@ -501,6 +530,80 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Room Confirmation Modal */}
+      {roomToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 bg-rose-50 border-b border-rose-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-900">
+                  {language === 'np' ? 'कोठा लिस्टिङ हटाउने निश्चित हुनुहुन्छ?' : 'Delete Room Listing?'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {language === 'np' ? 'यो कार्य फिर्ता गर्न सकिँदैन।' : 'This action cannot be undone.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Room Info Preview */}
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                <img
+                  src={roomToDelete.images[0]}
+                  alt={roomToDelete.title}
+                  className="w-14 h-14 rounded-lg object-cover shrink-0 border border-slate-200"
+                />
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-900 truncate">
+                    {language === 'np' ? roomToDelete.titleNp : roomToDelete.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    {roomToDelete.location.municipality}, Ward {roomToDelete.location.ward}
+                  </p>
+                  <p className="text-[11px] font-mono text-emerald-700 font-semibold">
+                    रु. {roomToDelete.price.toLocaleString('en-IN')}/mo
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {language === 'np'
+                  ? 'यो कोठा वेबसाइट तथा विद्यार्थीहरूको खोजी नतिजाबाट तुरुन्तै हट्नेछ। यस कोठाका लागि नयाँ बुकिङ तथा सोधपुछहरू बन्द हुनेछन्।'
+                  : 'This room will be immediately removed from the platform and student search results. New booking requests and inquiries will stop.'}
+              </p>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRoomToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  {language === 'np' ? 'रद्द गर्नुहोस् (Cancel)' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteRoom) {
+                      onDeleteRoom(roomToDelete.id);
+                    }
+                    setRoomToDelete(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{language === 'np' ? 'हो, कोठा हटाउनुहोस्' : 'Yes, Delete Listing'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
