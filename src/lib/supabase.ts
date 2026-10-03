@@ -50,7 +50,22 @@ export const stringToUUID = (input: string | null | undefined): string => {
 export const getAuthenticatedSessionUser = async (): Promise<{ id: string; email?: string } | null> => {
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
-    if (error || !session?.user || !isValidUUID(session.user.id)) {
+    if (error) {
+      if (
+        error.message?.includes('Refresh Token') ||
+        error.message?.includes('invalid_grant') ||
+        (error as any).status === 400
+      ) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem('iproom_supabase_auth_session');
+            localStorage.removeItem('iproom_nepal_user_session');
+          }
+        } catch (e) {}
+      }
+      return null;
+    }
+    if (!session?.user || !isValidUUID(session.user.id)) {
       return null;
     }
     return { id: session.user.id, email: session.user.email };

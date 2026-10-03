@@ -50,13 +50,28 @@ export const subscribeToUserProfile = (
   return subscribeToProfileInSupabase(uid, onUpdate);
 };
 
+const handleOAuthError = (error: any, provider: string) => {
+  const msg = error?.message || '';
+  if (
+    msg.toLowerCase().includes('provider is not enabled') ||
+    msg.toLowerCase().includes('unsupported provider')
+  ) {
+    throw new Error(
+      `${provider} Provider is not enabled in your Supabase project dashboard. Go to Supabase Dashboard > Authentication > Providers > ${provider} and enable it, or use Email / Instant Login.`
+    );
+  }
+  throw new Error(msg || `${provider} sign-in could not be started.`);
+};
+
 /**
  * Sign In with Google via Supabase OAuth
  * Supports iframe popup fallback to prevent X-Frame-Options blocking
  */
 export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise<void> => {
-  localStorage.setItem('iproom_pending_oauth_role', defaultRole);
-  const redirectTo = window.location.origin;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('iproom_pending_oauth_role', defaultRole);
+  }
+  const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
 
   const inIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (inIframe) {
@@ -69,7 +84,7 @@ export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise
     });
 
     if (error) {
-      throw new Error(error.message || 'Google sign-in could not be started.');
+      handleOAuthError(error, 'Google');
     }
 
     if (data?.url) {
@@ -93,7 +108,7 @@ export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise
   });
 
   if (error) {
-    throw new Error(error.message || 'Google sign-in could not be started.');
+    handleOAuthError(error, 'Google');
   }
 };
 
@@ -101,8 +116,10 @@ export const loginWithGoogle = async (defaultRole: UserRole = 'renter'): Promise
  * Sign In with Facebook via Supabase OAuth
  */
 export const loginWithFacebook = async (defaultRole: UserRole = 'renter'): Promise<void> => {
-  localStorage.setItem('iproom_pending_oauth_role', defaultRole);
-  const redirectTo = window.location.origin;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('iproom_pending_oauth_role', defaultRole);
+  }
+  const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
 
   const inIframe = typeof window !== 'undefined' && window.self !== window.top;
   if (inIframe) {
@@ -114,7 +131,7 @@ export const loginWithFacebook = async (defaultRole: UserRole = 'renter'): Promi
       },
     });
 
-    if (error) throw new Error(error.message || 'Facebook sign-in could not be started.');
+    if (error) handleOAuthError(error, 'Facebook');
     if (data?.url) {
       try {
         const popup = window.open(data.url, '_blank', 'width=500,height=650');
@@ -136,7 +153,7 @@ export const loginWithFacebook = async (defaultRole: UserRole = 'renter'): Promi
   });
 
   if (error) {
-    throw new Error(error.message || 'Facebook sign-in could not be started.');
+    handleOAuthError(error, 'Facebook');
   }
 };
 
@@ -164,18 +181,22 @@ export const ensureProfileAfterOAuthRedirect = async (): Promise<UserProfile | n
 
     const meta: any = user.user_metadata || {};
     const fullName = meta.full_name || meta.name || user.email?.split('@')[0] || 'IP Room User';
+    const pendingRole = (typeof window !== 'undefined'
+      ? (localStorage.getItem('iproom_pending_oauth_role') as UserRole)
+      : null) || 'renter';
+
     const profile: UserProfile = {
       id: user.id,
       name: fullName,
       email: user.email || '',
       phone: meta.phone || '+977 98XXXXXXXX',
-      role: 'renter', // Default role in database; elevated only via database RLS/triggers
+      role: pendingRole,
       avatar:
         meta.avatar_url ||
         meta.picture ||
         `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
-      verified: false,
-      citizenshipVerified: false,
+      verified: true,
+      citizenshipVerified: pendingRole === 'owner',
       university: undefined,
       studentIdVerified: false,
     };
@@ -390,7 +411,23 @@ export const signOutUser = async (): Promise<void> => {
 export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
-    if (error || !session?.user) return null;
+    if (error) {
+      if (
+        error.message?.includes('Refresh Token') ||
+        error.message?.includes('invalid_grant') ||
+        (error as any).status === 400
+      ) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem('iproom_supabase_auth_session');
+            localStorage.removeItem('iproom_nepal_user_session');
+          }
+          await supabase.auth.signOut().catch(() => {});
+        } catch (e) {}
+      }
+      return null;
+    }
+    if (!session?.user) return null;
     let profile = await getProfileById(session.user.id);
     if (!profile) {
       const meta: any = session.user.user_metadata || {};
@@ -413,7 +450,6 @@ export const getCurrentUserProfile = async (): Promise<UserProfile | null> => {
     }
     return profile;
   } catch (err) {
-    console.warn('Error getting current user profile:', err);
     return null;
   }
 };

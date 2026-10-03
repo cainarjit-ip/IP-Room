@@ -4,6 +4,7 @@ import { getTranslation } from '../data/translations';
 import { notifyChatMessage } from '../services/supabase/notificationService';
 import {
   getRoomChatMessages,
+  fetchRemoteChatMessages,
   saveRoomChatMessage,
   subscribeToLiveRoomChat,
   playChatNotificationSound,
@@ -122,11 +123,21 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
 
   // Real-time live synchronization via BroadcastChannel & Local Storage
   useEffect(() => {
-    // 1. Initial messages from cache
+    // 1. Initial messages from cache and Supabase cloud
     const initial = getRoomChatMessages(room.id);
     if (initial.length > 0) {
       setMessages(initial);
     }
+    fetchRemoteChatMessages(room.id).then((remoteList) => {
+      if (remoteList && remoteList.length > 0) {
+        setMessages((prev) => {
+          const map = new Map<string, ChatMessage>();
+          prev.forEach((m) => map.set(m.id, m));
+          remoteList.forEach((m) => map.set(m.id, m));
+          return Array.from(map.values());
+        });
+      }
+    });
 
     // 2. Real-time Live Subscription (cross-tab, in-memory, immediate)
     const unsubscribeLive = subscribeToLiveRoomChat(room.id, (incomingMsg) => {
@@ -152,7 +163,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
     let unsubscribeSupabase: (() => void) | null = null;
 
     if (ownerUUID && userUUID && ownerUUID !== userUUID) {
-      getOrCreateConversation(userUUID, ownerUUID)
+      getOrCreateConversation(userUUID, ownerUUID, room.id)
         .then((convId) => {
           if (convId) {
             setConversationId(convId);

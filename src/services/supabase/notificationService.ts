@@ -1,5 +1,6 @@
 import { supabase, isValidUUID, getAuthenticatedSessionUser } from '../../lib/supabase';
 import { UserRole, BookingRequest, UserProfile } from '../../types';
+import { getGlobalRealtimeChannel } from './chatService';
 
 export type NotificationType =
   | 'booking_inquiry'
@@ -46,6 +47,18 @@ const notifyInAppListeners = (notification: AppNotification) => {
     }
   });
 };
+
+// Listen for cross-device notifications over Supabase Realtime WebSockets
+if (typeof window !== 'undefined') {
+  try {
+    const globalChannel = getGlobalRealtimeChannel();
+    globalChannel.on('broadcast', { event: 'new_notification' }, ({ payload }) => {
+      if (payload && payload.id) {
+        notifyInAppListeners(payload as AppNotification);
+      }
+    });
+  } catch (e) {}
+}
 
 /**
  * Request Browser Push Notification Permission
@@ -101,6 +114,16 @@ export const sendPushNotification = async (
   // Broadcast to all active in-app listeners
   notifyInAppListeners(appNotif);
 
+  // Broadcast globally over Supabase Realtime WebSockets (across devices and Vercel deployments)
+  try {
+    const globalChannel = getGlobalRealtimeChannel();
+    globalChannel.send({
+      type: 'broadcast',
+      event: 'new_notification',
+      payload: appNotif,
+    }).catch(() => {});
+  } catch (e) {}
+
   // Save to role-specific and user-specific local queue so recipient receives it when viewing their dashboard/role
   try {
     if (appNotif.toRole) {
@@ -138,12 +161,11 @@ export const sendPushNotification = async (
         title: notification.title,
         message: notification.body,
         type: notification.type,
-        reference_id: (notification.data?.bookingId && isValidUUID(notification.data.bookingId)) ? notification.data.bookingId : null,
         is_read: false,
         created_at: now,
       });
     } catch (err) {
-      console.warn('Supabase notification insert notice:', err);
+      // Non-fatal if RLS restricts anon inserts
     }
   }
 

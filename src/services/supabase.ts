@@ -476,11 +476,9 @@ export const fetchRoomsFromSupabase = async (): Promise<RoomListing[]> => {
 
     if (!error && Array.isArray(data)) {
       remoteList = data.map(mapRoomFromRow);
-    } else if (error) {
-      console.warn('Supabase fetchRooms notice:', error.message);
     }
   } catch (err: any) {
-    console.warn('Supabase fetchRooms exception:', err?.message);
+    // Graceful offline fallback
   }
 
   // Retrieve locally published rooms from both IndexedDB and LocalStorage
