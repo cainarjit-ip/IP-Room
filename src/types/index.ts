@@ -315,4 +315,27 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   isSelf: boolean;
+  roomId?: string;
+  conversationId?: string;
+  recipientId?: string;
+  recipientRole?: UserRole;
+  renterId?: string;
+  renterName?: string;
+  senderSessionId?: string;
+}
+
+export interface ChatConversation {
+  id: string;
+  roomId: string;
+  roomTitle: string;
+  roomTitleNp?: string;
+  roomImage?: string;
+  ownerId: string;
+  ownerName: string;
+  ownerPhone?: string;
+  renterId: string;
+  renterName: string;
+  lastMessage?: ChatMessage;
+  unreadCount?: number;
+  updatedAt: string;
 }

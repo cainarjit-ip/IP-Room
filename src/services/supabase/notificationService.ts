@@ -2,6 +2,12 @@ import { supabase, isValidUUID, getAuthenticatedSessionUser } from '../../lib/su
 import { UserRole, BookingRequest, UserProfile } from '../../types';
 import { getGlobalRealtimeChannel } from './chatService';
 
+export const CURRENT_CLIENT_SESSION_ID: string =
+  typeof window !== 'undefined'
+    ? (window as any).__IPROOM_CLIENT_SESSION_ID__ ||
+      ((window as any).__IPROOM_CLIENT_SESSION_ID__ = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
+    : 'sess_server';
+
 export type NotificationType =
   | 'booking_inquiry'
   | 'booking_confirmed'
@@ -16,6 +22,7 @@ export interface AppNotification {
   title: string;
   body: string;
   read: boolean;
+  senderSessionId?: string;
   data?: {
     bookingId?: string;
     roomId?: string;
@@ -53,8 +60,26 @@ if (typeof window !== 'undefined') {
   try {
     const globalChannel = getGlobalRealtimeChannel();
     globalChannel.on('broadcast', { event: 'new_notification' }, ({ payload }) => {
-      if (payload && payload.id) {
-        notifyInAppListeners(payload as AppNotification);
+      if (!payload || !payload.id) return;
+      // CRITICAL: NEVER notify the sender from the same browser session or device!
+      if (payload.senderSessionId && payload.senderSessionId === CURRENT_CLIENT_SESSION_ID) {
+        return;
+      }
+      notifyInAppListeners(payload as AppNotification);
+
+      // Trigger desktop notification only on the RECIPIENT's device
+      if (
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        try {
+          new Notification(payload.title, {
+            body: payload.body,
+            icon: '/vite.svg',
+          });
+        } catch (e) {
+          // Ignore desktop notification error
+        }
       }
     });
   } catch (e) {}
@@ -108,13 +133,14 @@ export const sendPushNotification = async (
   const appNotif: AppNotification = {
     ...notification,
     id: createdId,
+    senderSessionId: notification.senderSessionId || CURRENT_CLIENT_SESSION_ID,
     createdAt: now,
   };
 
-  // Broadcast to all active in-app listeners
-  notifyInAppListeners(appNotif);
+  // DO NOT call notifyInAppListeners on the sender's own window!
+  // The sender who produced the event should NOT be alerted with their own message.
 
-  // Broadcast globally over Supabase Realtime WebSockets (across devices and Vercel deployments)
+  // Broadcast globally over Supabase Realtime WebSockets to remote clients/devices
   try {
     const globalChannel = getGlobalRealtimeChannel();
     globalChannel.send({
@@ -134,22 +160,6 @@ export const sendPushNotification = async (
     }
   } catch (e) {
     // ignore local storage error
-  }
-
-  // Show native browser desktop notification if permission granted
-  if (
-    typeof window !== 'undefined' &&
-    'Notification' in window &&
-    Notification.permission === 'granted'
-  ) {
-    try {
-      new Notification(appNotif.title, {
-        body: appNotif.body,
-        icon: '/vite.svg',
-      });
-    } catch (e) {
-      console.warn('Native notification notice:', e);
-    }
   }
 
   // Persist into Supabase notifications table if valid UUID

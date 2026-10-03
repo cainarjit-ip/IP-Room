@@ -16,6 +16,7 @@ import {
   requestPushNotificationPermission,
   markNotificationAsRead,
   addNotificationListener,
+  CURRENT_CLIENT_SESSION_ID,
 } from '../services/supabase/notificationService';
 import { UserProfile, UserRole, Language } from '../types';
 
@@ -56,7 +57,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   // Listen to in-app foreground notifications for floating toast banner (ONLY for recipient)
   useEffect(() => {
     const unsubscribe = addNotificationListener((notif) => {
-      // 1. NEVER show a notification to the sender who sent the message!
+      // 1. NEVER show a notification to the sender who triggered the action!
+      if (notif.senderSessionId && notif.senderSessionId === CURRENT_CLIENT_SESSION_ID) {
+        return;
+      }
       if (currentUser?.id && notif.data?.senderId && notif.data.senderId === currentUser.id) {
         return;
       }
@@ -74,13 +78,13 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       }
 
       // 3. If directed to a specific user ID, ensure it matches current user
-      if (
-        notif.toUserId &&
-        notif.toUserId !== 'all' &&
-        currentUser?.id &&
-        notif.toUserId !== currentUser.id
-      ) {
-        return;
+      if (notif.toUserId && notif.toUserId !== 'all') {
+        if (currentUser?.id && notif.toUserId !== currentUser.id) {
+          return;
+        }
+        if (!currentUser?.id && notif.toRole === 'owner') {
+          return;
+        }
       }
 
       // Show floating toast to recipient

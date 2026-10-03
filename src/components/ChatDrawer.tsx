@@ -1,17 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RoomListing, Language, ChatMessage, UserProfile } from '../types';
+import { RoomListing, Language, ChatMessage, UserProfile, ChatConversation } from '../types';
 import { getTranslation } from '../data/translations';
 import { notifyChatMessage } from '../services/supabase/notificationService';
 import {
-  getRoomChatMessages,
+  getConversationMessages,
   fetchRemoteChatMessages,
   saveRoomChatMessage,
   subscribeToLiveRoomChat,
   playChatNotificationSound,
-  getOrCreateConversation,
-  getConversationMessages,
-  sendMessage,
-  subscribeToMessages,
+  getClientRenterIdentity,
+  getRoomConversations,
 } from '../services/supabase/chatService';
 import { generateUUID, isValidUUID } from '../services/supabase';
 import {
@@ -22,11 +20,9 @@ import {
   Phone,
   MessageCircle,
   Clock,
-  UserCheck,
-  ArrowRightLeft,
-  Info,
-  Radio,
-  Sparkles,
+  User,
+  Users,
+  Check,
 } from 'lucide-react';
 
 interface ChatDrawerProps {
@@ -34,6 +30,7 @@ interface ChatDrawerProps {
   language: Language;
   currentUser?: UserProfile | null;
   onClose: () => void;
+  initialRenterId?: string;
 }
 
 export const ChatDrawer: React.FC<ChatDrawerProps> = ({
@@ -41,43 +38,65 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   language,
   currentUser,
   onClose,
+  initialRenterId,
 }) => {
   if (!room) return null;
 
   const t = getTranslation(language);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
 
-  // Stable IDs
-  const stableOwnerId = room.owner.id || 'owner-lister';
-  const stableStudentId = currentUser?.id || 'student-guest';
-
-  // Determine if the current authenticated user is the actual Room Lister
+  // 1. Determine if the current authenticated user is the ACTUAL owner of this room
   const isActualOwner = Boolean(
-    currentUser &&
-      (currentUser.role === 'owner' ||
-        (isValidUUID(currentUser.id) &&
-          isValidUUID(room.owner.id) &&
-          currentUser.id === room.owner.id) ||
-        (currentUser.name &&
-          room.owner.name &&
-          currentUser.name.toLowerCase() === room.owner.name.toLowerCase()) ||
-        (currentUser.phone &&
-          room.owner.phone &&
-          currentUser.phone.replace(/\s+/g, '') === room.owner.phone.replace(/\s+/g, '')))
+    currentUser && (
+      (isValidUUID(currentUser.id) &&
+        isValidUUID(room.owner.id) &&
+        currentUser.id === room.owner.id) ||
+      (currentUser.name &&
+        room.owner.name &&
+        currentUser.name.trim().toLowerCase() === room.owner.name.trim().toLowerCase()) ||
+      (currentUser.phone &&
+        room.owner.phone &&
+        currentUser.phone.replace(/\s+/g, '') === room.owner.phone.replace(/\s+/g, ''))
+    )
   );
 
-  // Active chat role view (defaults to real role, with demo switch capability)
-  const [actingAsOwner, setActingAsOwner] = useState<boolean>(isActualOwner);
+  const isAdmin = Boolean(currentUser && currentUser.role === 'admin');
 
-  // Update actingAsOwner whenever currentUser changes
-  useEffect(() => {
-    setActingAsOwner(isActualOwner);
-  }, [isActualOwner]);
+  // 2. Identify the active renter for this chat thread
+  // If user is a student/renter, they are chatting as themselves
+  const myRenterIdentity = getClientRenterIdentity(currentUser);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    return getRoomChatMessages(room.id);
+  // If user is the owner or admin, they might be viewing a specific renter's inquiry
+  const [roomConversations, setRoomConversations] = useState<ChatConversation[]>(() => {
+    return getRoomConversations(room.id);
   });
+
+  const [selectedRenterId, setSelectedRenterId] = useState<string>(() => {
+    if (initialRenterId) return initialRenterId;
+    if (isActualOwner || isAdmin) {
+      const convs = getRoomConversations(room.id);
+      if (convs.length > 0) return convs[0].renterId;
+      return 'prospective-student';
+    }
+    return myRenterIdentity.id;
+  });
+
+  const [selectedRenterName, setSelectedRenterName] = useState<string>(() => {
+    if (isActualOwner || isAdmin) {
+      const conv = roomConversations.find(c => c.renterId === selectedRenterId);
+      return conv?.renterName || (language === 'np' ? 'विद्यार्थी (Student)' : 'Student Inquirer');
+    }
+    return myRenterIdentity.name;
+  });
+
+  // Effective conversation renter ID
+  const activeRenterId = isActualOwner || isAdmin ? selectedRenterId : myRenterIdentity.id;
+
+  // 3. Load messages strictly for this room & active renter
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    return getConversationMessages(room.id, activeRenterId);
+  });
+
   const [inputVal, setInputVal] = useState('');
 
   // Quick inquiry chips for students
@@ -96,13 +115,13 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           '💰 Any student discount on rent?',
         ];
 
-  // Quick responses for room lister (घरधनी)
+  // Quick replies for Room Lister (owner)
   const ownerQuickReplies =
     language === 'np'
       ? [
           'हो, कोठा उपलब्ध छ। अवलोकन गर्न आउन सक्नुहुन्छ।',
           'पानी दैनिक आउँछ, सबमिटरको दर रु १२/युनिट छ।',
-          'कृपया विस्तृत जानकारीको लागि कल गर्नुहोला।',
+          'कृपया विस्तृत जानकारीको लागि सिधै कल गर्नुहोला।',
           'भाडामा केही विचार गर्न सकिन्छ, हेर्न आउनुहोस्।',
         ]
       : [
@@ -121,166 +140,168 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
     scrollToBottom();
   }, [messages]);
 
-  // Real-time live synchronization via BroadcastChannel & Local Storage
+  // Refresh room conversations list for owner
   useEffect(() => {
-    // 1. Initial messages from cache and Supabase cloud
-    const initial = getRoomChatMessages(room.id);
-    if (initial.length > 0) {
-      setMessages(initial);
+    if (isActualOwner || isAdmin) {
+      const convs = getRoomConversations(room.id);
+      setRoomConversations(convs);
+      if (!selectedRenterId && convs.length > 0) {
+        setSelectedRenterId(convs[0].renterId);
+        setSelectedRenterName(convs[0].renterName);
+      }
     }
-    fetchRemoteChatMessages(room.id).then((remoteList) => {
+  }, [room.id, isActualOwner, isAdmin]);
+
+  // Load and subscribe to messages when activeRenterId or room.id changes
+  useEffect(() => {
+    // 1. Initial local load
+    const local = getConversationMessages(room.id, activeRenterId);
+    setMessages(local);
+
+    // 2. Fetch remote from Supabase
+    fetchRemoteChatMessages(room.id, activeRenterId).then((remoteList) => {
       if (remoteList && remoteList.length > 0) {
         setMessages((prev) => {
           const map = new Map<string, ChatMessage>();
           prev.forEach((m) => map.set(m.id, m));
           remoteList.forEach((m) => map.set(m.id, m));
-          return Array.from(map.values());
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
         });
       }
     });
 
-    // 2. Real-time Live Subscription (cross-tab, in-memory, immediate)
-    const unsubscribeLive = subscribeToLiveRoomChat(room.id, (incomingMsg) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === incomingMsg.id)) {
-          return prev;
+    // 3. Subscribe to live chat messages for this room and renter
+    const unsubscribe = subscribeToLiveRoomChat(
+      room.id,
+      (incomingMsg) => {
+        // If owner/admin, also update conversations list
+        if (isActualOwner || isAdmin) {
+          setRoomConversations(getRoomConversations(room.id));
         }
 
-        // Play audio chime if incoming message is from the other party
-        const isFromOwner = incomingMsg.senderRole === 'owner';
-        const isViewerMessage = actingAsOwner ? isFromOwner : !isFromOwner;
-        if (!isViewerMessage) {
-          playChatNotificationSound();
+        // Only append if it belongs to this conversation
+        if (incomingMsg.renterId && incomingMsg.renterId !== activeRenterId) {
+          return;
         }
 
-        return [...prev, incomingMsg];
-      });
-    });
-
-    // 3. Connect via Supabase PostgreSQL if valid UUIDs exist
-    const ownerUUID = isValidUUID(room.owner.id) ? room.owner.id : null;
-    const userUUID = currentUser?.id && isValidUUID(currentUser.id) ? currentUser.id : null;
-    let unsubscribeSupabase: (() => void) | null = null;
-
-    if (ownerUUID && userUUID && ownerUUID !== userUUID) {
-      getOrCreateConversation(userUUID, ownerUUID, room.id)
-        .then((convId) => {
-          if (convId) {
-            setConversationId(convId);
-            getConversationMessages(convId, userUUID).then((remoteMsgs) => {
-              if (remoteMsgs && remoteMsgs.length > 0) {
-                setMessages((prev) => {
-                  const combined = [...prev];
-                  remoteMsgs.forEach((rm) => {
-                    if (!combined.some((m) => m.id === rm.id)) {
-                      combined.push(rm);
-                    }
-                  });
-                  return combined.sort(
-                    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                  );
-                });
-              }
-            });
-
-            unsubscribeSupabase = subscribeToMessages(convId, userUUID, (newMsg) => {
-              setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev;
-                return [...prev, newMsg];
-              });
-            });
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === incomingMsg.id)) {
+            return prev;
           }
-        })
-        .catch(() => {});
-    }
+
+          // Play audio chime ONLY if incoming message is from the other party
+          const isFromOwner = incomingMsg.senderRole === 'owner';
+          const isMyRole = isActualOwner ? isFromOwner : !isFromOwner;
+          if (!isMyRole) {
+            playChatNotificationSound();
+          }
+
+          return [...prev, incomingMsg];
+        });
+      },
+      activeRenterId
+    );
 
     return () => {
-      unsubscribeLive();
-      if (unsubscribeSupabase) unsubscribeSupabase();
+      unsubscribe();
     };
-  }, [room.id, room.owner.id, currentUser?.id, actingAsOwner]);
+  }, [room.id, activeRenterId, isActualOwner, isAdmin]);
 
   /**
-   * Send a live message:
-   * - If actingAsOwner is true: Sent by Room Lister (घरधनी) from their own ID.
-   * - If actingAsOwner is false: Sent by Student/Tenant inquiring about the room.
-   * Instantly broadcasts live to other tabs and plays audio chime.
+   * Send a chat message:
+   * - If user is Room Owner: sends as Room Owner to the selected renter.
+   * - If user is Renter: sends inquiry to the Room Owner.
+   * Notifications are sent ONLY to the recipient; NEVER to the sender!
    */
-  const sendChatMessage = (textToSend: string) => {
+  const handleSendMessage = (textToSend: string) => {
     if (!textToSend.trim()) return;
     const trimmed = textToSend.trim();
 
     let newMsg: ChatMessage;
 
-    if (actingAsOwner) {
-      // Room Lister is sending reply from their own ID
+    if (isActualOwner) {
+      // Room Lister is replying to the student
       newMsg = {
         id: generateUUID(),
-        senderId: stableOwnerId,
+        senderId: room.owner.id || currentUser?.id || 'room-owner',
         senderName: room.owner.name,
         senderRole: 'owner',
         text: trimmed,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isSelf: true,
+        roomId: room.id,
+        renterId: activeRenterId,
+        renterName: selectedRenterName,
+        recipientId: activeRenterId,
+        recipientRole: 'renter',
       };
 
       // Notify the inquiring student (recipient: renter)
       notifyChatMessage(
-        stableStudentId,
+        activeRenterId,
         'renter',
         room.owner.name,
         trimmed,
         language === 'np' ? room.titleNp : room.title,
         room.id,
-        stableOwnerId
+        room.owner.id
       );
     } else {
-      // Student is sending an inquiry to the Room Lister
-      const studentName =
-        currentUser?.name || (language === 'np' ? 'विद्यार्थी (Student)' : 'Prospective Student');
+      // Student is sending inquiry to the Room Lister
+      const studentName = myRenterIdentity.name;
 
       newMsg = {
         id: generateUUID(),
-        senderId: stableStudentId,
+        senderId: activeRenterId,
         senderName: studentName,
         senderRole: 'renter',
         text: trimmed,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isSelf: true,
+        roomId: room.id,
+        renterId: activeRenterId,
+        renterName: studentName,
+        recipientId: room.owner.id,
+        recipientRole: 'owner',
       };
 
       // Notify the Room Lister in real time (recipient: owner)
       notifyChatMessage(
-        stableOwnerId,
+        room.owner.id,
         'owner',
-        newMsg.senderName,
+        studentName,
         trimmed,
         language === 'np' ? room.titleNp : room.title,
         room.id,
-        stableStudentId
+        activeRenterId
       );
     }
 
-    // Save locally and broadcast live to all tabs
-    const updatedMessages = saveRoomChatMessage(room.id, newMsg);
-    setMessages(updatedMessages);
+    // Save and broadcast live
+    const updated = saveRoomChatMessage(room.id, newMsg, {
+      roomTitle: room.title,
+      roomTitleNp: room.titleNp,
+      roomImage: room.images[0],
+      ownerId: room.owner.id,
+      ownerName: room.owner.name,
+      ownerPhone: room.owner.phone,
+      renterId: activeRenterId,
+      renterName: isActualOwner ? selectedRenterName : myRenterIdentity.name,
+    });
+
+    setMessages(updated);
     setInputVal('');
 
-    // Persist to Supabase if conversationId is active
-    if (conversationId) {
-      const senderUUID = actingAsOwner
-        ? isValidUUID(stableOwnerId) ? stableOwnerId : null
-        : isValidUUID(stableStudentId) ? stableStudentId : null;
-
-      if (senderUUID) {
-        sendMessage(conversationId, senderUUID, trimmed).catch(() => {});
-      }
+    if (isActualOwner || isAdmin) {
+      setRoomConversations(getRoomConversations(room.id));
     }
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    sendChatMessage(inputVal);
+    handleSendMessage(inputVal);
   };
 
   return (
@@ -346,7 +367,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close Chat"
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition ml-1"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition ml-1 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -371,55 +392,82 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           </div>
         </div>
 
-        {/* Direct Owner/Lister Role Switcher for testing/replying */}
-        <button
-          type="button"
-          onClick={() => setActingAsOwner(!actingAsOwner)}
-          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition flex items-center gap-1 shrink-0 ${
-            actingAsOwner
-              ? 'bg-purple-100 text-purple-900 border-purple-300'
-              : 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
-          }`}
-          title="Switch view to test replying as the Room Lister or Student"
-        >
-          <ArrowRightLeft className="w-3 h-3" />
-          <span>
-            {actingAsOwner
-              ? language === 'np'
-                ? 'घरधनी मोड (Lister ID)'
-                : 'Lister Mode'
-              : language === 'np'
-              ? 'विद्यार्थी मोड (Student)'
-              : 'Student Mode'}
-          </span>
-        </button>
+        {/* Identity Badge */}
+        <div className="shrink-0">
+          {isActualOwner ? (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-300">
+              {language === 'np' ? 'घरधनी ड्यासबोर्ड' : 'Owner Portal'}
+            </span>
+          ) : isAdmin ? (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-300">
+              Admin Inspection
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300">
+              {language === 'np' ? 'विद्यार्थी सोधपुछ' : 'Student Inquiry'}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Live Status & Current Active Responder Banner */}
+      {/* If Room Lister is viewing and there are multiple inquiries for this room, show Inquirer Tabs */}
+      {(isActualOwner || isAdmin) && roomConversations.length > 1 && (
+        <div className="p-2 bg-slate-100/90 border-b border-slate-200 shrink-0">
+          <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-slate-600">
+            <Users className="w-3 h-3 text-slate-500" />
+            <span>{language === 'np' ? 'सोधपुछ गर्ने विद्यार्थीहरू:' : 'Student Inquirers:'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {roomConversations.map((conv) => {
+              const isSelected = conv.renterId === activeRenterId;
+              return (
+                <button
+                  key={conv.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRenterId(conv.renterId);
+                    setSelectedRenterName(conv.renterName);
+                  }}
+                  className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
+                    isSelected
+                      ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <User className="w-3 h-3" />
+                  <span>{conv.renterName}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Live Status Banner */}
       <div
         className={`px-3 py-1.5 text-[11px] font-medium border-b flex items-center justify-between ${
-          actingAsOwner
+          isActualOwner
             ? 'bg-purple-50 text-purple-900 border-purple-200'
             : 'bg-slate-100 text-slate-700 border-slate-200'
         }`}
       >
         <span className="flex items-center gap-1.5 truncate">
-          {actingAsOwner ? (
+          {isActualOwner ? (
             <>
-              <UserCheck className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+              <ShieldCheck className="w-3.5 h-3.5 text-purple-700 shrink-0" />
               <span className="truncate">
                 {language === 'np'
-                  ? `तपाईं घरधनी (${room.owner.name}) को आइडीबाट जवाफ दिँदै हुनुहुन्छ`
-                  : `Replying from Room Lister account (${room.owner.name})`}
+                  ? `विद्यार्थी (${selectedRenterName}) लाई जवाफ दिँदै`
+                  : `Replying to student (${selectedRenterName})`}
               </span>
             </>
           ) : (
             <>
-              <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <span className="truncate">
                 {language === 'np'
                   ? `घरधनी (${room.owner.name}) सँग सिधा कुराकानी`
-                  : `Direct inquiry to Room Lister (${room.owner.name})`}
+                  : `Direct chat with room lister (${room.owner.name})`}
               </span>
             </>
           )}
@@ -440,21 +488,28 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               <MessageCircle className="w-6 h-6" />
             </div>
             <h3 className="font-bold text-xs text-slate-800">
-              {language === 'np'
-                ? `घरधनी (${room.owner.name}) सँग सिधै च्याट गर्नुहोस्`
-                : `Direct chat with ${room.owner.name}`}
+              {isActualOwner
+                ? language === 'np'
+                  ? 'अहिलेसम्म कुनै सन्देश छैन'
+                  : 'No messages yet'
+                : language === 'np'
+                ? `घरधनी (${room.owner.name}) लाई पहिलो सन्देश पठाउनुहोस्`
+                : `Send inquiry to ${room.owner.name}`}
             </h3>
             <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
-              {language === 'np'
-                ? 'तपाईंले पठाएको सन्देश घरधनीको खातामा सिधै तत्काल पुग्नेछ र उहाँले आफ्नो आधिकारिक आइडीबाट सिधै जवाफ दिनुहुनेछ।'
-                : 'Send your questions directly to the room lister. They will receive an immediate notification and reply live from their verified account.'}
+              {isActualOwner
+                ? language === 'np'
+                  ? 'यस विद्यार्थीको सोधपुछ सन्देश यहाँ देखा पर्नेछ।'
+                  : 'Student questions will appear here in real time.'
+                : language === 'np'
+                ? 'तपाईंले पठाएको सन्देश कोठाधनीको आधिकारिक खातामा तुरुन्तै पुग्नेछ र उहाँले जवाफ दिएपछि मात्र यहाँ जवाफ देखिनेछ।'
+                : 'Your message will be sent directly to the room lister. Only when they reply will their answer appear here.'}
             </p>
           </div>
         ) : (
           messages.map((msg) => {
-            // Determine alignment and styling based on whether the message is from the lister or student
             const isFromLister = msg.senderRole === 'owner';
-            const isViewerMessage = actingAsOwner ? isFromLister : !isFromLister;
+            const isViewerMessage = isActualOwner ? isFromLister : !isFromLister;
 
             return (
               <div
@@ -463,11 +518,11 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               >
                 <div className="flex items-center gap-1.5 mb-1 px-1">
                   <span className="text-[10px] font-bold text-slate-600">
-                    {isFromLister ? `${room.owner.name}` : msg.senderName}
+                    {isFromLister ? room.owner.name : msg.senderName}
                   </span>
                   {isFromLister && (
                     <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded border border-emerald-300">
-                      {language === 'np' ? 'घरधनी (Lister)' : 'Room Lister'}
+                      {language === 'np' ? 'घरधनी' : 'Room Lister'}
                     </span>
                   )}
                   {!isFromLister && (
@@ -498,8 +553,25 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick Inquiry Prompts for student mode OR Quick Replies for owner mode */}
-      {!actingAsOwner ? (
+      {/* Waiting notice for renter if last message was sent by renter */}
+      {!isActualOwner && messages.length > 0 && messages[messages.length - 1].senderRole === 'renter' && (
+        <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-200 text-[10px] text-amber-800 flex items-center justify-between shrink-0">
+          <span className="flex items-center gap-1">
+            <Clock className="w-3 h-3 text-amber-600" />
+            <span>
+              {language === 'np'
+                ? 'सन्देश पठाइयो। घरधनीको जवाफको प्रतीक्षा गर्दै...'
+                : 'Message sent. Waiting for room lister to reply...'}
+            </span>
+          </span>
+          <span className="font-semibold text-amber-900">
+            {language === 'np' ? 'उहाँले जवाफ दिएपछि देखिनेछ' : 'Reply arrives when sent'}
+          </span>
+        </div>
+      )}
+
+      {/* Quick Inquiry Prompts for student OR Quick Replies for owner */}
+      {!isActualOwner ? (
         <div className="p-2 bg-slate-50 border-t border-slate-200/80 overflow-x-auto no-scrollbar flex items-center gap-1.5 shrink-0">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1 shrink-0">
             {language === 'np' ? 'सोध्नुहोस्:' : 'Ask:'}
@@ -508,7 +580,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             <button
               key={idx}
               type="button"
-              onClick={() => sendChatMessage(q)}
+              onClick={() => handleSendMessage(q)}
               className="text-[11px] font-medium text-slate-700 bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 border border-slate-200 rounded-full px-2.5 py-1 whitespace-nowrap transition shadow-2xs shrink-0 cursor-pointer"
             >
               {q}
@@ -517,15 +589,14 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
         </div>
       ) : (
         <div className="p-2 bg-purple-50/70 border-t border-purple-200/80 overflow-x-auto no-scrollbar flex items-center gap-1.5 shrink-0">
-          <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider pl-1 shrink-0 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-purple-600" />
-            <span>{language === 'np' ? 'छिटो जवाफ:' : 'Quick Reply:'}</span>
+          <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider pl-1 shrink-0">
+            {language === 'np' ? 'छिटो जवाफ:' : 'Quick Reply:'}
           </span>
           {ownerQuickReplies.map((r, idx) => (
             <button
               key={idx}
               type="button"
-              onClick={() => sendChatMessage(r)}
+              onClick={() => handleSendMessage(r)}
               className="text-[11px] font-medium text-purple-900 bg-white hover:bg-purple-100 border border-purple-200 rounded-full px-2.5 py-1 whitespace-nowrap transition shadow-2xs shrink-0 cursor-pointer"
             >
               {r}
@@ -544,12 +615,12 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
           placeholder={
-            actingAsOwner
+            isActualOwner
               ? language === 'np'
-                ? `विद्यार्थीलाई घरधनी (${room.owner.name}) को रूपमा जवाफ लेख्नुहोस्...`
-                : `Reply to student as the Room Lister (${room.owner.name})...`
+                ? `विद्यार्थी (${selectedRenterName}) लाई जवाफ लेख्नुहोस्...`
+                : `Reply to student (${selectedRenterName})...`
               : language === 'np'
-              ? `घरधनी ${room.owner.name} लाई सन्देश लेख्नुहोस्...`
+              ? `घरधनी ${room.owner.name} लाई सन्देश पठाउनुहोस्...`
               : `Message room lister ${room.owner.name}...`
           }
           className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
@@ -558,7 +629,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           type="submit"
           className="p-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl transition shadow-xs disabled:opacity-40 active:scale-95 shrink-0 cursor-pointer"
           disabled={!inputVal.trim()}
-          title={actingAsOwner ? 'Send reply as Room Lister' : 'Send message to Room Lister'}
+          title={isActualOwner ? 'Send reply as Room Lister' : 'Send message to Room Lister'}
         >
           <Send className="w-4 h-4" />
         </button>

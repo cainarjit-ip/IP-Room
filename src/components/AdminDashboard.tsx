@@ -1,8 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { RoomListing, DisputeTicket, Language, UserProfile, ModerationLogEntry, ListingStatus } from '../types';
+import { RoomListing, DisputeTicket, Language, UserProfile, ModerationLogEntry, ListingStatus, ChatConversation, ChatMessage } from '../types';
 import { getTranslation } from '../data/translations';
 import { ListingInspectionModal } from './ListingInspectionModal';
 import { RejectionReasonModal } from './RejectionReasonModal';
+import {
+  getAllConversations,
+  getConversationMessages,
+  subscribeToLiveRoomChat,
+  saveRoomChatMessage,
+} from '../services/supabase/chatService';
 import {
   ShieldAlert,
   CheckCircle,
@@ -22,7 +28,14 @@ import {
   Clock,
   User,
   History,
-  CheckCheck
+  CheckCheck,
+  MessageSquare,
+  MessageCircle,
+  ExternalLink,
+  Send,
+  Phone,
+  Radio,
+  Sparkles,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -57,7 +70,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSelectRoom,
 }) => {
   const t = getTranslation(language);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history' | 'chats'>('pending');
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,6 +88,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [resolutionText, setResolutionText] = useState('');
   const [activeDisputeId, setActiveDisputeId] = useState<string | null>(null);
 
+  // Platform-wide Chat Moderation state
+  const [allConversations, setAllConversations] = useState<ChatConversation[]>(() => getAllConversations());
+  const [selectedChatConv, setSelectedChatConv] = useState<ChatConversation | null>(null);
+  const [chatSearch, setChatSearch] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [adminNoteText, setAdminNoteText] = useState('');
+
+  // Real-time synchronization for platform chats
+  React.useEffect(() => {
+    setAllConversations(getAllConversations());
+    const unsub = subscribeToLiveRoomChat('*', () => {
+      const convs = getAllConversations();
+      setAllConversations(convs);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sync messages when selected conversation changes
+  React.useEffect(() => {
+    if (selectedChatConv) {
+      setChatMessages(getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId));
+      const unsub = subscribeToLiveRoomChat(
+        selectedChatConv.roomId,
+        () => {
+          setChatMessages(getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId));
+        },
+        selectedChatConv.renterId
+      );
+      return () => unsub();
+    } else {
+      setChatMessages([]);
+    }
+  }, [selectedChatConv?.id]);
+
   const showNotification = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
@@ -86,6 +133,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const rejectedCount = rooms.filter(r => r.status === 'rejected').length;
   const suspendedCount = rooms.filter(r => r.status === 'suspended').length;
   const totalCount = rooms.length;
+
+  // Filtered conversations logic for Admin
+  const filteredConversations = useMemo(() => {
+    if (!chatSearch.trim()) return allConversations;
+    const q = chatSearch.toLowerCase();
+    return allConversations.filter(
+      (c) =>
+        c.roomTitle.toLowerCase().includes(q) ||
+        (c.roomTitleNp && c.roomTitleNp.toLowerCase().includes(q)) ||
+        c.renterName.toLowerCase().includes(q) ||
+        c.ownerName.toLowerCase().includes(q) ||
+        (c.lastMessage && c.lastMessage.text.toLowerCase().includes(q))
+    );
+  }, [allConversations, chatSearch]);
 
   // Filtered rooms logic
   const filteredListings = useMemo(() => {
@@ -373,6 +434,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <ShieldAlert className="w-3.5 h-3.5" />
             <span>Disputes ({disputes.filter(d => d.status !== 'resolved').length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('chats')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+              activeTab === 'chats'
+                ? 'bg-emerald-800 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{language === 'np' ? 'सबै च्याट अनुगमन' : 'Platform Chats'} ({allConversations.length})</span>
           </button>
         </div>
       </div>
@@ -758,6 +832,296 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 7. Platform-wide Live Chat Inspection & Moderation Tab */}
+      {activeTab === 'chats' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header */}
+          <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl border border-slate-800">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="font-bold text-xs text-emerald-300 uppercase tracking-wider">
+                  Admin Real-time Chat Surveillance · च्याट अनुगमन
+                </span>
+                <span className="text-slate-600">·</span>
+                <span className="text-xs text-slate-300">
+                  Total Conversations: {allConversations.length}
+                </span>
+              </div>
+              <h2 className="font-display font-extrabold text-2xl text-white">
+                Platform-Wide Chat & Inquiry Surveillance
+              </h2>
+              <p className="mt-1 text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                Inspect every live conversation between prospective student renters and room listers across Nepal. Monitor inquiries, detect fraud or harassment, and ensure safe communication.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 text-center min-w-[130px]">
+                <span className="text-2xl font-bold font-mono text-emerald-400 block">
+                  {allConversations.length}
+                </span>
+                <span className="text-[10px] text-slate-400 font-semibold uppercase">
+                  Active Threads
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+            <Search className="w-4 h-4 text-slate-400 ml-2" />
+            <input
+              type="text"
+              placeholder="Search chat by room title, student name, or landlord name..."
+              value={chatSearch}
+              onChange={(e) => setChatSearch(e.target.value)}
+              className="w-full text-xs bg-transparent focus:outline-none text-slate-900"
+            />
+            {chatSearch && (
+              <button
+                type="button"
+                onClick={() => setChatSearch('')}
+                className="text-xs text-slate-400 hover:text-slate-600 mr-2 cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {allConversations.length === 0 ? (
+            <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
+              <MessageSquare className="w-12 h-12 text-slate-300 mx-auto" />
+              <h3 className="font-bold text-sm text-slate-800">
+                {language === 'np' ? 'अहिलेसम्म कुनै प्रत्यक्ष च्याट दर्ता भएको छैन' : 'No Chat Conversations Yet'}
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                {language === 'np'
+                  ? 'विद्यार्थीहरूले कोठाबारे सोधपुछ गर्दा र घरधनीले जवाफ दिँदा यहाँ सम्पूर्ण संवादहरू वास्तविक समयमा देखिनेछन्।'
+                  : 'When student renters inquire about room listings, all conversations will appear here in real time for administrator inspection.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[550px]">
+              {/* Left Column: Conversations List */}
+              <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col h-[650px]">
+                <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <span className="font-bold text-xs text-slate-800">
+                    Conversations ({filteredConversations.length})
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Click to inspect transcript
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                  {filteredConversations.map((conv) => {
+                    const isSelected = selectedChatConv?.id === conv.id;
+                    const roomObj = rooms.find(r => r.id === conv.roomId);
+
+                    return (
+                      <div
+                        key={conv.id}
+                        onClick={() => setSelectedChatConv(conv)}
+                        className={`p-3.5 transition cursor-pointer flex items-start gap-3 ${
+                          isSelected ? 'bg-emerald-50/80 border-l-4 border-emerald-600' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <img
+                          src={conv.roomImage || roomObj?.images[0] || 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=400&q=80'}
+                          alt={conv.roomTitle}
+                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <h4 className="font-bold text-xs text-slate-900 truncate">
+                              {language === 'np' && conv.roomTitleNp ? conv.roomTitleNp : conv.roomTitle}
+                            </h4>
+                            <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                              {conv.lastMessage?.timestamp || ''}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 mt-1 text-[11px]">
+                            <span className="font-semibold text-slate-700 truncate">
+                              👤 {conv.renterName}
+                            </span>
+                            <span className="text-slate-400">↔</span>
+                            <span className="font-semibold text-emerald-800 truncate">
+                              🏠 {conv.ownerName}
+                            </span>
+                          </div>
+
+                          {conv.lastMessage && (
+                            <p className="text-[11px] text-slate-500 truncate mt-1 italic">
+                              "{conv.lastMessage.text}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right Column: Transcript View */}
+              <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col h-[650px]">
+                {selectedChatConv ? (
+                  <>
+                    {/* Header */}
+                    <div className="p-4 bg-slate-900 text-white border-b border-slate-800 shrink-0 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs sm:text-sm text-white truncate">
+                            {selectedChatConv.roomTitle}
+                          </span>
+                          <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800 font-mono">
+                            Room ID: {selectedChatConv.roomId.substring(0, 8)}...
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-1">
+                          <span>Student: <strong>{selectedChatConv.renterName}</strong></span>
+                          <span>·</span>
+                          <span>Owner: <strong>{selectedChatConv.ownerName}</strong></span>
+                          {selectedChatConv.ownerPhone && (
+                            <>
+                              <span>·</span>
+                              <span className="text-emerald-400">📞 {selectedChatConv.ownerPhone}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* View Listing Button */}
+                      {rooms.find(r => r.id === selectedChatConv.roomId) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const r = rooms.find(rm => rm.id === selectedChatConv.roomId);
+                            if (r) onSelectRoom(r);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold border border-slate-700 transition shrink-0 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>View Room</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Messages Scroll Area */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#F8FAFC]">
+                      {chatMessages.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs">
+                          No messages recorded in this conversation yet.
+                        </div>
+                      ) : (
+                        chatMessages.map((msg) => {
+                          const isFromOwner = msg.senderRole === 'owner';
+                          const isFromAdmin = msg.senderRole === 'admin';
+
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col ${isFromOwner ? 'items-end' : isFromAdmin ? 'items-center' : 'items-start'}`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px]">
+                                <span className="font-bold text-slate-700">
+                                  {msg.senderName}
+                                </span>
+                                {isFromOwner ? (
+                                  <span className="bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded border border-emerald-300">
+                                    Landlord / Lister
+                                  </span>
+                                ) : isFromAdmin ? (
+                                  <span className="bg-purple-100 text-purple-800 font-bold px-1.5 py-0.2 rounded border border-purple-300">
+                                    Admin Moderator
+                                  </span>
+                                ) : (
+                                  <span className="bg-blue-100 text-blue-800 font-medium px-1.5 py-0.2 rounded border border-blue-200">
+                                    Student / Renter
+                                  </span>
+                                )}
+                                <span className="text-slate-400 font-mono">{msg.timestamp}</span>
+                              </div>
+
+                              <div
+                                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed ${
+                                  isFromOwner
+                                    ? 'bg-emerald-700 text-white rounded-br-xs shadow-xs'
+                                    : isFromAdmin
+                                    ? 'bg-purple-700 text-white text-center shadow-xs'
+                                    : 'bg-white text-slate-800 border border-slate-200 rounded-bl-xs shadow-xs'
+                                }`}
+                              >
+                                {msg.text}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Admin Moderation Notice Sender */}
+                    <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0">
+                      <input
+                        type="text"
+                        placeholder="Send official moderation notice to this conversation..."
+                        value={adminNoteText}
+                        onChange={(e) => setAdminNoteText(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!adminNoteText.trim()) return;
+                          const newMsg: ChatMessage = {
+                            id: `admin-${Date.now()}`,
+                            senderId: currentUser?.id || 'admin',
+                            senderName: 'Platform Moderator (Admin)',
+                            senderRole: 'admin',
+                            text: adminNoteText.trim(),
+                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            isSelf: true,
+                            roomId: selectedChatConv.roomId,
+                            renterId: selectedChatConv.renterId,
+                            conversationId: selectedChatConv.id,
+                          };
+                          saveRoomChatMessage(selectedChatConv.roomId, newMsg, {
+                            roomTitle: selectedChatConv.roomTitle,
+                            ownerId: selectedChatConv.ownerId,
+                            ownerName: selectedChatConv.ownerName,
+                            renterId: selectedChatConv.renterId,
+                            renterName: selectedChatConv.renterName,
+                          });
+                          setChatMessages(prev => [...prev, newMsg]);
+                          setAdminNoteText('');
+                          showNotification('Administrative notice posted to conversation.');
+                        }}
+                        disabled={!adminNoteText.trim()}
+                        className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Post Notice</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-2">
+                    <MessageSquare className="w-12 h-12 text-slate-300" />
+                    <p className="font-semibold text-xs text-slate-600">
+                      Select a conversation on the left to view the complete transcript.
+                    </p>
+                    <p className="text-[11px] text-slate-400 max-w-xs">
+                      All messages, timestamps, and participants are recorded for safety and audit purposes.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

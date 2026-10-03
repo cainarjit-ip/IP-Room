@@ -60,6 +60,7 @@ import {
   setupForegroundFCMListener,
   notifyOwnerOfNewBookingInquiry,
   notifyStudentOfBookingConfirmed,
+  CURRENT_CLIENT_SESSION_ID,
 } from './services/supabase/notificationService';
 
 // Components
@@ -403,7 +404,13 @@ export default function App() {
     // 3. Foreground listener for real-time in-app broadcasts (strictly filtered for recipient)
     let unsubscribeForeground: (() => void) | null = null;
     setupForegroundFCMListener(incomingNotif => {
-      // Never notify the sender who triggered the message!
+      // 1. Never notify the sender who triggered the action from this device/session!
+      if (
+        incomingNotif.senderSessionId &&
+        incomingNotif.senderSessionId === CURRENT_CLIENT_SESSION_ID
+      ) {
+        return;
+      }
       if (
         currentUser?.id &&
         incomingNotif.data?.senderId &&
@@ -425,13 +432,13 @@ export default function App() {
       }
 
       // 3. If directed to a specific user ID, ensure it matches current user
-      if (
-        incomingNotif.toUserId &&
-        incomingNotif.toUserId !== 'all' &&
-        currentUser?.id &&
-        incomingNotif.toUserId !== currentUser.id
-      ) {
-        return;
+      if (incomingNotif.toUserId && incomingNotif.toUserId !== 'all') {
+        if (currentUser?.id && incomingNotif.toUserId !== currentUser.id) {
+          return;
+        }
+        if (!currentUser?.id && incomingNotif.toRole === 'owner') {
+          return;
+        }
       }
 
       setNotifications(prev => [
