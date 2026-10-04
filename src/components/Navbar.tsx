@@ -39,7 +39,7 @@ interface NavbarProps {
   onSignOut: () => void;
   notifications?: AppNotification[];
   onOpenBookingContract?: (bookingId: string) => void;
-  onOpenChatWithRoom?: (roomId: string) => void;
+  onOpenChatWithRoom?: (roomId: string, conversationId?: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -320,6 +320,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onOpenBookingContract={onOpenBookingContract}
                   onOpenOwnerDashboard={() => navigateTo('owner-dashboard')}
                   onOpenChatWithRoom={onOpenChatWithRoom}
+                  onOpenAuthModal={() => onOpenAuthModal('login')}
                 />
               </div>
 

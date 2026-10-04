@@ -26,6 +26,7 @@ export interface AppNotification {
   data?: {
     bookingId?: string;
     roomId?: string;
+    conversationId?: string;
     senderId?: string;
     senderName?: string;
     amount?: number;
@@ -152,8 +153,8 @@ export const sendPushNotification = async (
 
   // Save to role-specific and user-specific local queue so recipient receives it when viewing their dashboard/role
   try {
-    if (appNotif.toRole) {
-      const queueKey = `iproom_notifs_${appNotif.toRole}`;
+    if (appNotif.toUserId && isValidUUID(appNotif.toUserId)) {
+      const queueKey = `iproom_notifs_user_${appNotif.toUserId}`;
       const existing = JSON.parse(localStorage.getItem(queueKey) || '[]');
       const updated = [appNotif, ...existing.filter((n: any) => n.id !== appNotif.id)].slice(0, 30);
       localStorage.setItem(queueKey, JSON.stringify(updated));
@@ -171,7 +172,10 @@ export const sendPushNotification = async (
         title: notification.title,
         message: notification.body,
         type: notification.type,
+        reference_id: notification.data?.roomId || notification.data?.bookingId || null,
+        data: notification.data || {},
         is_read: false,
+        read: false,
         created_at: now,
       });
     } catch (err) {
@@ -270,7 +274,8 @@ export const notifyChatMessage = async (
   messageText: string,
   roomTitle: string,
   roomId?: string,
-  senderId?: string
+  senderId?: string,
+  conversationId?: string
 ): Promise<AppNotification> => {
   const shortMsg = messageText.length > 70 ? messageText.substring(0, 67) + '...' : messageText;
   return sendPushNotification({
@@ -278,10 +283,11 @@ export const notifyChatMessage = async (
     toRole: recipientRole,
     type: 'chat_message',
     title: `New Message from ${senderName} 💬`,
-    body: `"${shortMsg}" — regarding ${roomTitle}`,
+    body: `"${shortMsg}" — ${roomTitle}`,
     read: false,
     data: {
       roomId,
+      conversationId,
       senderId,
       senderName,
     },
@@ -299,11 +305,17 @@ export const mapNotificationRowToModel = (row: any): AppNotification => ({
       ? 'booking_inquiry'
       : row.type === 'booking_accepted' || row.type === 'booking_confirmed' || row.type === 'booking_approved'
         ? 'booking_confirmed'
-        : 'system',
-  createdAt: row.created_at || new Date().toISOString(),
-  read: Boolean(row.is_read),
+        : row.type === 'chat_message'
+          ? 'chat_message'
+          : 'system',
+  createdAt: row.created_at || row.timestamp || new Date().toISOString(),
+  read: Boolean(row.is_read || row.read),
   data: {
-    bookingId: row.reference_id || undefined,
+    bookingId: row.type?.startsWith('booking') ? (row.reference_id || row.data?.bookingId) : undefined,
+    roomId: row.data?.roomId || (row.type === 'chat_message' ? row.reference_id : undefined),
+    conversationId: row.data?.conversationId || undefined,
+    senderId: row.data?.senderId || undefined,
+    senderName: row.data?.senderName || undefined,
   },
 });
 
@@ -438,17 +450,7 @@ export const subscribeToRealtimeNotifications = (
     .limit(25)
     .then(({ data, error }) => {
       if (!error && data) {
-        const notifs: AppNotification[] = data.map((row: any) => ({
-          id: row.id,
-          toUserId: row.user_id,
-          toRole: userRole,
-          type: (row.type as NotificationType) || 'system',
-          title: row.title || 'IP Room Notification',
-          body: row.message || '',
-          read: Boolean(row.is_read),
-          createdAt: row.created_at || new Date().toISOString(),
-          data: row.reference_id ? { bookingId: row.reference_id } : undefined,
-        }));
+        const notifs: AppNotification[] = data.map(mapNotificationRowToModel);
         onUpdate(notifs);
       }
     });
@@ -475,17 +477,7 @@ export const subscribeToRealtimeNotifications = (
           .limit(25)
           .then(({ data }) => {
             if (data) {
-              const refreshed: AppNotification[] = data.map((row: any) => ({
-                id: row.id,
-                toUserId: row.user_id,
-                toRole: userRole,
-                type: (row.type as NotificationType) || 'system',
-                title: row.title || 'IP Room Notification',
-                body: row.message || '',
-                read: Boolean(row.is_read),
-                createdAt: row.created_at || new Date().toISOString(),
-                data: row.reference_id ? { bookingId: row.reference_id } : undefined,
-              }));
+              const refreshed: AppNotification[] = data.map(mapNotificationRowToModel);
               onUpdate(refreshed);
             }
           });

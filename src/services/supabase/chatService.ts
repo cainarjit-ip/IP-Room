@@ -388,6 +388,76 @@ export const getOwnerConversations = async (
 };
 
 /**
+ * Fetch all conversations for a specific room (so the owner can view & reply to renters)
+ */
+export const getConversationsForRoom = async (
+  roomId: string
+): Promise<{ conversations: DbConversation[]; error: string | null }> => {
+  if (!isValidUUID(roomId)) {
+    return { conversations: [], error: null };
+  }
+
+  try {
+    const { data: convs, error } = await (supabase.from('conversations') as any)
+      .select('*')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { conversations: [], error: error.message };
+    }
+    if (!convs || convs.length === 0) {
+      return { conversations: [], error: null };
+    }
+
+    const renterIds = Array.from(new Set(convs.map((c: any) => c.renter_id).filter(Boolean)));
+    const convIds = convs.map((c: any) => c.id);
+
+    const [profilesRes, messagesRes] = await Promise.all([
+      (supabase.from('profiles') as any)
+        .select('id, full_name, name, email, phone, avatar_url, avatar')
+        .in('id', renterIds),
+      (supabase.from('messages') as any)
+        .select('*')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false }),
+    ]);
+
+    const profilesMap = new Map(
+      (profilesRes.data || []).map((p: any) => [
+        p.id,
+        {
+          id: p.id,
+          name: p.full_name || p.name || 'Student / Renter',
+          email: p.email,
+          phone: p.phone,
+          avatar: p.avatar_url || p.avatar,
+        },
+      ])
+    );
+
+    const messagesByConv = new Map<string, DbMessage[]>();
+    (messagesRes.data || []).forEach((m: any) => {
+      const list = messagesByConv.get(m.conversation_id) || [];
+      list.push(m as DbMessage);
+      messagesByConv.set(m.conversation_id, list);
+    });
+
+    const enriched: DbConversation[] = convs.map((c: any) => ({
+      ...c,
+      renter_profile: profilesMap.get(c.renter_id),
+      last_message: (messagesByConv.get(c.id) || [])[0],
+      unread_count: (messagesByConv.get(c.id) || []).filter((m: any) => !m.is_read).length,
+    }));
+
+    return { conversations: enriched, error: null };
+  } catch (err: any) {
+    console.error('Exception in getConversationsForRoom:', err);
+    return { conversations: [], error: err?.message || 'Failed to load conversations for room' };
+  }
+};
+
+/**
  * Fetch conversations for a student/renter across all rooms they inquired about
  */
 export const getRenterConversations = async (

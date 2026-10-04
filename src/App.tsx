@@ -371,12 +371,26 @@ export default function App() {
   // Real-time Push Notifications (Supabase Realtime)
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // Subscribe to real-time notifications filtered strictly for the active role & recipient
+  // Subscribe to real-time notifications filtered strictly for the authenticated user
   useEffect(() => {
-    // 1. Initial load from role-specific local queue
+    // Clean up any legacy shared localStorage queues so no unauthenticated leaks occur
     try {
-      const queueKey = `iproom_notifs_${activeRole}`;
-      const cached = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      localStorage.removeItem('iproom_notifs_renter');
+      localStorage.removeItem('iproom_notifs_owner');
+      localStorage.removeItem('iproom_notifs_admin');
+      localStorage.removeItem('iproom_notifs_all');
+    } catch (e) {}
+
+    // CRITICAL: If no user is logged in, notification bar MUST NOT show any messages!
+    if (!currentUser?.id || !isValidUUID(currentUser.id)) {
+      setNotifications([]);
+      return;
+    }
+
+    // 1. Initial load from user-specific local queue
+    try {
+      const userQueueKey = `iproom_notifs_user_${currentUser.id}`;
+      const cached = JSON.parse(localStorage.getItem(userQueueKey) || '[]');
       if (Array.isArray(cached)) {
         setNotifications(cached);
       }
@@ -384,28 +398,32 @@ export default function App() {
       setNotifications([]);
     }
 
-    // 2. Real-time Supabase push notifications if authenticated
+    // 2. Real-time Supabase push notifications from database
     let unsubscribeNotifications: (() => void) | null = null;
-    if (currentUser?.id && isValidUUID(currentUser.id)) {
-      unsubscribeNotifications = subscribeToRealtimeNotifications(
-        activeRole,
-        currentUser.id,
-        incomingNotifs => {
-          if (incomingNotifs.length > 0) {
-            // Filter by active role
-            const filtered = incomingNotifs.filter(
-              n => n.toRole === 'all' || n.toRole === activeRole
+    unsubscribeNotifications = subscribeToRealtimeNotifications(
+      activeRole,
+      currentUser.id,
+      incomingNotifs => {
+        if (incomingNotifs.length > 0) {
+          // Strictly for current user
+          const userOnly = incomingNotifs.filter(
+            n => !n.toUserId || n.toUserId === 'all' || n.toUserId === currentUser.id
+          );
+          setNotifications(userOnly);
+          try {
+            localStorage.setItem(
+              `iproom_notifs_user_${currentUser.id}`,
+              JSON.stringify(userOnly)
             );
-            setNotifications(filtered);
-          }
+          } catch (e) {}
         }
-      );
-    }
+      }
+    );
 
     // 3. Foreground listener for real-time in-app broadcasts (strictly filtered for recipient)
     let unsubscribeForeground: (() => void) | null = null;
     setupForegroundFCMListener(incomingNotif => {
-      // 1. Never notify the sender who triggered the action from this device/session!
+      // Never notify the sender who triggered the action from this device/session!
       if (
         incomingNotif.senderSessionId &&
         incomingNotif.senderSessionId === CURRENT_CLIENT_SESSION_ID
@@ -413,39 +431,38 @@ export default function App() {
         return;
       }
       if (
-        currentUser?.id &&
+        currentUser.id &&
         incomingNotif.data?.senderId &&
         incomingNotif.data.senderId === currentUser.id
       ) {
         return;
       }
       if (
-        currentUser?.name &&
+        currentUser.name &&
         incomingNotif.data?.senderName &&
         incomingNotif.data.senderName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()
       ) {
         return;
       }
 
-      // 2. Notification must strictly match the recipient's active role
-      if (incomingNotif.toRole !== 'all' && incomingNotif.toRole !== activeRole) {
+      // Notification must strictly match current user
+      if (incomingNotif.toUserId && incomingNotif.toUserId !== 'all' && incomingNotif.toUserId !== currentUser.id) {
         return;
       }
 
-      // 3. If directed to a specific user ID, ensure it matches current user
-      if (incomingNotif.toUserId && incomingNotif.toUserId !== 'all') {
-        if (currentUser?.id && incomingNotif.toUserId !== currentUser.id) {
-          return;
-        }
-        if (!currentUser?.id && incomingNotif.toRole === 'owner') {
-          return;
-        }
-      }
-
-      setNotifications(prev => [
-        incomingNotif,
-        ...prev.filter(n => n.id !== incomingNotif.id),
-      ]);
+      setNotifications(prev => {
+        const updated = [
+          incomingNotif,
+          ...prev.filter(n => n.id !== incomingNotif.id),
+        ];
+        try {
+          localStorage.setItem(
+            `iproom_notifs_user_${currentUser.id}`,
+            JSON.stringify(updated.slice(0, 30))
+          );
+        } catch (e) {}
+        return updated;
+      });
     }).then(unsub => {
       if (unsub) unsubscribeForeground = unsub;
     });
@@ -454,7 +471,7 @@ export default function App() {
       if (unsubscribeNotifications) unsubscribeNotifications();
       if (unsubscribeForeground) unsubscribeForeground();
     };
-  }, [activeRole, currentUser?.id, currentUser?.name]);
+  }, [currentUser?.id, currentUser?.name, activeRole]);
 
   // Student user behavior & AI recommendation tracking
   const [userProfile, setUserProfile] = useState<UserBehaviorProfile>(getInitialBehaviorProfile());
@@ -1016,10 +1033,15 @@ export default function App() {
             setViewingContractBooking(found);
           }
         }}
-        onOpenChatWithRoom={roomId => {
+        onOpenChatWithRoom={(roomId, conversationId) => {
           const found = rooms.find(r => r.id === roomId);
           if (found) {
             setActiveChatRoom(found);
+            if (conversationId) {
+              setActiveChatConversation({ id: conversationId, room_id: roomId } as any);
+            } else {
+              setActiveChatConversation(null);
+            }
           }
         }}
       />
