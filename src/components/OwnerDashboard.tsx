@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { RoomListing, BookingRequest, Language, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
 import { OwnerAnalytics } from './OwnerAnalytics';
 import {
-  getAllRoomChatSummaries,
-  subscribeToLiveRoomChat,
+  DbConversation,
+  getOwnerConversations,
 } from '../services/supabase/chatService';
+import {
+  subscribeOwnerToPush,
+  unsubscribeOwnerFromPush,
+  checkCurrentPushSubscription,
+  isPushSupported,
+} from '../services/supabase/pushService';
 import {
   PlusCircle,
   Building,
@@ -23,6 +29,10 @@ import {
   MessageSquare,
   Trash2,
   AlertTriangle,
+  Smartphone,
+  Bell,
+  Loader2,
+  ExternalLink,
 } from 'lucide-react';
 
 interface OwnerDashboardProps {
@@ -36,6 +46,7 @@ interface OwnerDashboardProps {
   onViewContract: (booking: BookingRequest) => void;
   onSelectRoom: (room: RoomListing) => void;
   onOpenChatWithRoom?: (room: RoomListing) => void;
+  onOpenChatWithConversation?: (room: RoomListing, conversation: DbConversation) => void;
   onDeleteRoom?: (roomId: string) => void;
 }
 
@@ -50,6 +61,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   onViewContract,
   onSelectRoom,
   onOpenChatWithRoom,
+  onOpenChatWithConversation,
   onDeleteRoom,
 }) => {
   const t = getTranslation(language);
@@ -59,30 +71,81 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   >('listings');
   const [roomToDelete, setRoomToDelete] = useState<RoomListing | null>(null);
 
-  // Live chat inquiries summary across all listings
-  const [chatSummaries, setChatSummaries] = useState(() => getAllRoomChatSummaries());
+  // Private conversation threads (RULE 1)
+  const [conversations, setConversations] = useState<DbConversation[]>([]);
+  const [isLoadingConversations, setIsLoadingConversations] = useState<boolean>(false);
 
+  // Mobile Web Push Notification state (RULE 2)
+  const [isPushActive, setIsPushActive] = useState<boolean>(false);
+  const [isSubscribingPush, setIsSubscribingPush] = useState<boolean>(false);
+  const [pushStatusMessage, setPushStatusMessage] = useState<string | null>(null);
+
+  // Landlord's own listings strictly filtered by owner_id (RULE 3)
+  const myRooms = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return rooms.filter(
+      (r) => r.owner?.id === currentUser.id || (r as any).owner_id === currentUser.id
+    );
+  }, [rooms, currentUser?.id]);
+
+  // Load conversations and push status
   useEffect(() => {
-    // Initial fetch
-    setChatSummaries(getAllRoomChatSummaries());
+    if (!currentUser?.id) return;
 
-    // Subscribe to real-time chat updates across all rooms
-    const unsubscribe = subscribeToLiveRoomChat('*', () => {
-      setChatSummaries(getAllRoomChatSummaries());
+    setIsLoadingConversations(true);
+    getOwnerConversations(currentUser.id).then(({ conversations: list, error }) => {
+      if (error) {
+        console.error('Error loading conversations for owner:', error);
+      } else {
+        setConversations(list);
+      }
+      setIsLoadingConversations(false);
     });
 
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    checkCurrentPushSubscription().then((active) => {
+      setIsPushActive(active);
+    });
+  }, [currentUser?.id]);
 
-  const totalChatMessages = Object.values(chatSummaries).reduce(
-    (sum, item) => sum + (item.total || 0),
+  const handleEnablePush = async () => {
+    if (!currentUser?.id) return;
+    setIsSubscribingPush(true);
+    setPushStatusMessage(null);
+    try {
+      const { success, error } = await subscribeOwnerToPush(currentUser.id);
+      if (success) {
+        setIsPushActive(true);
+        setPushStatusMessage(
+          language === 'np'
+            ? 'मोबाइल नोटिफिकेसन सफलतापूर्वक सक्रिय भयो! विद्यार्थीले सन्देश पठाउँदा अलर्ट आउनेछ।'
+            : 'Push notifications enabled successfully! You will get alerts even when this tab is closed.'
+        );
+      } else {
+        setPushStatusMessage(error || 'Failed to enable notifications.');
+      }
+    } finally {
+      setIsSubscribingPush(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    if (!currentUser?.id) return;
+    setIsSubscribingPush(true);
+    try {
+      await unsubscribeOwnerFromPush(currentUser.id);
+      setIsPushActive(false);
+      setPushStatusMessage(
+        language === 'np' ? 'मोबाइल नोटिफिकेसन बन्द गरियो।' : 'Push notifications disabled.'
+      );
+    } finally {
+      setIsSubscribingPush(false);
+    }
+  };
+
+  const totalUnreadMessages = conversations.reduce(
+    (sum, item) => sum + (item.unread_count || 0),
     0
   );
-
-  // Landlord's listings
-  const myRooms = rooms;
 
   // Real calculations based on actual user data
   const totalRentCollected = bookings.reduce(
@@ -189,10 +252,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 : 'Student Inquiries & Chats'}
             </span>
 
-            {totalChatMessages > 0 ? (
+            {conversations.length > 0 ? (
               <span className="text-[10px] bg-emerald-600 text-white font-mono px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                <span>{totalChatMessages}</span>
+                <span>{conversations.length}</span>
               </span>
             ) : (
               <span className="text-[10px] bg-slate-200 text-slate-700 font-mono px-1.5 py-0.5 rounded-full font-semibold">
@@ -253,92 +316,243 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
             <div className="bg-emerald-950/80 border border-emerald-700/80 rounded-2xl p-4 text-center shrink-0 min-w-[160px]">
               <span className="block text-3xl font-extrabold font-mono text-emerald-400">
-                {totalChatMessages}
+                {conversations.length}
               </span>
               <span className="text-xs font-semibold text-emerald-200 mt-0.5 block">
-                {language === 'np' ? 'कुल च्याट सन्देश' : 'Total Messages'}
+                {language === 'np' ? 'सक्रिय विद्यार्थी च्याट' : 'Active Student Threads'}
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {myRooms.map((room) => {
-              const summary = chatSummaries[room.id];
-              const msgCount = summary?.total || 0;
-              const lastMsg = summary?.lastMessage;
+          {/* Real Mobile Web Push Notification Section (RULE 2) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div
+                className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                  isPushActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                <Smartphone className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-sm text-slate-900">
+                    {language === 'np' ? 'मोबाइल पुश नोटिफिकेसन' : 'Mobile Push Notifications'}
+                  </h3>
+                  {isPushActive ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>{language === 'np' ? 'सक्रिय छ' : 'Active'}</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                      {language === 'np' ? 'निष्क्रिय' : 'Disabled'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 max-w-xl leading-relaxed">
+                  {language === 'np'
+                    ? 'विद्यार्थीहरूले कोठाबारे सन्देश पठाउँदा तपाईंको मोबाइलको नोटिफिकेसन बारमा सिधै अलर्ट आउँछ (वेबसाइट बन्द भएको बेलामा पनि)।'
+                    : 'Get real-time push alerts on your phone lock screen even when this tab or browser is closed.'}
+                </p>
+                {pushStatusMessage && (
+                  <p className="text-xs font-semibold text-emerald-700 pt-0.5 animate-in fade-in">
+                    ✓ {pushStatusMessage}
+                  </p>
+                )}
+              </div>
+            </div>
 
-              return (
-                <div
-                  key={room.id}
-                  className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between"
+            <div className="shrink-0 flex items-center gap-2">
+              {isPushActive ? (
+                <button
+                  type="button"
+                  onClick={handleDisablePush}
+                  disabled={isSubscribingPush}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer disabled:opacity-50"
                 >
-                  <div>
-                    <div className="flex items-center gap-3 mb-4">
-                      <img
-                        src={room.images[0]}
-                        alt={room.title}
-                        className="w-14 h-14 rounded-xl object-cover border border-slate-200 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-xs font-bold text-slate-900 truncate">
-                            {language === 'np' ? room.titleNp : room.title}
-                          </span>
-                          {msgCount > 0 ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full shrink-0">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              <span>{msgCount} Live</span>
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
-                              0 {language === 'np' ? 'सन्देश' : 'Msgs'}
-                            </span>
-                          )}
+                  {language === 'np' ? 'नोटिफिकेसन बन्द गर्नुहोस्' : 'Disable notifications'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEnablePush}
+                  disabled={isSubscribingPush}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {isSubscribingPush ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Bell className="w-4 h-4" />
+                  )}
+                  <span>
+                    {language === 'np'
+                      ? 'मोबाइल नोटिफिकेसन सक्रिय गर्नुहोस्'
+                      : 'Enable message notifications'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Individual Renter Inquiries (RULE 1: one conversation per room_id + renter_id) */}
+          {isLoadingConversations ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
+              <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mx-auto" />
+              <p className="text-xs text-slate-500">
+                {language === 'np'
+                  ? 'विद्यार्थी च्याटहरू लोड हुँदै...'
+                  : 'Loading student conversation threads...'}
+              </p>
+            </div>
+          ) : conversations.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {conversations.map((conv) => {
+                const targetRoom = rooms.find((r) => r.id === conv.room_id) || conv.room;
+                const renterName =
+                  conv.renter_profile?.name ||
+                  (language === 'np' ? 'विद्यार्थी सोधपुछ' : 'Prospective Student');
+                const lastMsg = conv.last_message;
+                const unreadCount = conv.unread_count || 0;
+
+                return (
+                  <div
+                    key={conv.id}
+                    className={`bg-white rounded-2xl border p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between ${
+                      unreadCount > 0
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200/90'
+                    }`}
+                  >
+                    <div>
+                      {/* Renter Header */}
+                      <div className="flex items-center gap-3 mb-3.5">
+                        <img
+                          src={
+                            conv.renter_profile?.avatar ||
+                            `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(renterName)}`
+                          }
+                          alt={renterName}
+                          className="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                              {renterName}
+                            </h4>
+                            {unreadCount > 0 && (
+                              <span className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full shrink-0 animate-pulse">
+                                {unreadCount} New
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {conv.renter_profile?.phone ||
+                              conv.renter_profile?.email ||
+                              (language === 'np' ? 'प्रमाणित विद्यार्थी' : 'Verified Student')}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          रु. {room.price.toLocaleString('en-IN')}/mo · {room.location.municipality}
-                        </p>
                       </div>
+
+                      {/* Room Target Banner */}
+                      {targetRoom && (
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 mb-3.5 flex items-center gap-2.5">
+                          <img
+                            src={
+                              targetRoom.images?.[0] ||
+                              'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=400&q=80'
+                            }
+                            alt={targetRoom.title}
+                            className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[11px] font-bold text-slate-800 truncate block">
+                              {language === 'np' && (targetRoom as any)?.titleNp
+                                ? (targetRoom as any).titleNp
+                                : targetRoom?.title}
+                            </span>
+                            <span className="text-[10px] text-emerald-700 font-mono font-semibold">
+                              रु. {targetRoom.price?.toLocaleString('en-IN')}/mo
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Last Message Snippet */}
+                      {lastMsg ? (
+                        <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100 mb-4 text-xs space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span className="font-bold text-slate-700">
+                              {lastMsg.sender_id === currentUser?.id
+                                ? language === 'np'
+                                  ? 'तपाईं (You)'
+                                  : 'You'
+                                : renterName}
+                            </span>
+                            <span className="font-mono">
+                              {new Date(lastMsg.created_at).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-slate-800 line-clamp-2 text-xs italic">
+                            "{lastMsg.content}"
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 mb-4 text-xs text-slate-400 text-center">
+                          {language === 'np'
+                            ? 'सोधपुछ सुरु भयो। च्याट खोलेर जवाफ दिनुहोस्।'
+                            : 'Thread started. Click below to reply.'}
+                        </div>
+                      )}
                     </div>
 
-                    {lastMsg ? (
-                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/70 mb-4 text-xs space-y-1.5">
-                        <div className="flex items-center justify-between text-[10px] text-slate-400">
-                          <span className="font-bold text-slate-700">
-                            {lastMsg.senderName} ({lastMsg.senderRole === 'owner' ? (language === 'np' ? 'तपाईं' : 'You') : (language === 'np' ? 'विद्यार्थी' : 'Student')})
-                          </span>
-                          <span className="font-mono">{lastMsg.timestamp}</span>
-                        </div>
-                        <p className="text-slate-800 line-clamp-2 text-xs italic">
-                          "{lastMsg.text}"
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="p-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200 mb-4 text-xs text-slate-400 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const roomListing =
+                          rooms.find((r) => r.id === conv.room_id) || (targetRoom as RoomListing);
+                        if (roomListing) {
+                          if (onOpenChatWithConversation) {
+                            onOpenChatWithConversation(roomListing, conv);
+                          } else if (onOpenChatWithRoom) {
+                            onOpenChatWithRoom(roomListing);
+                          }
+                        }
+                      }}
+                      className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>
                         {language === 'np'
-                          ? 'अहिलेसम्म कुनै सन्देश छैन। विद्यार्थीले सोधपुछ गर्दा यहाँ देखिनेछ।'
-                          : 'No inquiries yet. Real-time messages will appear here.'}
-                      </div>
-                    )}
+                          ? 'निजी च्याट खोल्नुहोस् र जवाफ दिनुहोस्'
+                          : 'Open Private Thread & Reply'}
+                      </span>
+                    </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
-                    className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
-                    title={language === 'np' ? 'विद्यार्थीसँग च्याट खोल्नुहोस् र जवाफ दिनुहोस्' : 'Open live chat with students and reply'}
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>
-                      {language === 'np'
-                        ? 'च्याट खोल्नुहोस् र जवाफ दिनुहोस्'
-                        : 'Open Live Chat & Reply'}
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Fallback when no active conversation rows in DB yet */
+            <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-4">
+              <MessageSquare className="w-12 h-12 text-slate-300 mx-auto" />
+              <div className="max-w-md mx-auto space-y-1">
+                <h3 className="font-bold text-sm text-slate-900">
+                  {language === 'np'
+                    ? 'अहिलेसम्म कुनै विद्यार्थी सोधपुछ छैन'
+                    : 'No Student Inquiries Yet'}
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {language === 'np'
+                    ? 'विद्यार्थीहरूले तपाईंका कोठा हेरेर निजी च्याट सुरु गरेपछि प्रत्येक विद्यार्थीको छुट्टाछुट्टै सन्देश थ्रेड यहाँ देखिनेछ।'
+                    : 'When prospective students view your listings and send inquiries, their private individual chat threads will appear here.'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       ) : activeOwnerTab === 'analytics' ? (
         <OwnerAnalytics
@@ -672,22 +886,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         >
                           {language === 'np' ? 'कोठा हेर्नुहोस्' : 'View Listing'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
-                          className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                            chatSummaries[room.id]?.total
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          }`}
-                          title="Open student inquiries and reply to chat as Room Lister"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span>
-                            {language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}
-                            {chatSummaries[room.id]?.total ? ` (${chatSummaries[room.id].total})` : ''}
-                          </span>
-                        </button>
+                        {(() => {
+                          const roomInquiriesCount = conversations.filter(
+                            (c) => c.room_id === room.id
+                          ).length;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => onOpenChatWithRoom && onOpenChatWithRoom(room)}
+                              className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                                roomInquiriesCount > 0
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              }`}
+                              title="Open student inquiries and reply to chat as Room Lister"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>
+                                {language === 'np' ? 'विद्यार्थी च्याट' : 'Student Chat'}
+                                {roomInquiriesCount > 0 ? ` (${roomInquiriesCount})` : ''}
+                              </span>
+                            </button>
+                          );
+                        })()}
                       </div>
 
                       <button

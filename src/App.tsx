@@ -53,6 +53,7 @@ import {
   onAuthStateChange,
   updateDisputeStatusInSupabase,
   fetchDisputesFromSupabase,
+  DbConversation,
 } from './services/supabase';
 import {
   AppNotification,
@@ -491,6 +492,7 @@ export default function App() {
   const [bookingRoom, setBookingRoom] = useState<RoomListing | null>(null);
   const [viewingContractBooking, setViewingContractBooking] = useState<BookingRequest | null>(null);
   const [activeChatRoom, setActiveChatRoom] = useState<RoomListing | null>(null);
+  const [activeChatConversation, setActiveChatConversation] = useState<DbConversation | null>(null);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [isAddListingOpen, setIsAddListingOpen] = useState(false);
@@ -1200,7 +1202,14 @@ export default function App() {
             onRejectBooking={handleRejectBooking}
             onViewContract={b => setViewingContractBooking(b)}
             onSelectRoom={handleSelectRoom}
-            onOpenChatWithRoom={r => setActiveChatRoom(r)}
+            onOpenChatWithRoom={(r) => {
+              setActiveChatRoom(r);
+              setActiveChatConversation(null);
+            }}
+            onOpenChatWithConversation={(r, conv) => {
+              setActiveChatRoom(r);
+              setActiveChatConversation(conv);
+            }}
             onDeleteRoom={handleOwnerDeleteRoom}
           />
         )}
@@ -1273,9 +1282,14 @@ export default function App() {
       {activeChatRoom && (
         <ChatDrawer
           room={activeChatRoom}
+          activeConversation={activeChatConversation}
           language={language}
           currentUser={currentUser}
-          onClose={() => setActiveChatRoom(null)}
+          onClose={() => {
+            setActiveChatRoom(null);
+            setActiveChatConversation(null);
+          }}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
         />
       )}
 

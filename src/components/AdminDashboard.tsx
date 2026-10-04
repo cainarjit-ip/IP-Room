@@ -8,7 +8,9 @@ import {
   getConversationMessages,
   subscribeToLiveRoomChat,
   saveRoomChatMessage,
+  getAllAdminConversations,
 } from '../services/supabase/chatService';
+import { isValidUUID, supabase } from '../lib/supabase';
 import {
   ShieldAlert,
   CheckCircle,
@@ -97,10 +99,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Real-time synchronization for platform chats
   React.useEffect(() => {
-    setAllConversations(getAllConversations());
+    const fetchPlatformConversations = async () => {
+      // 1. First get local cached conversations
+      const localConvs = getAllConversations();
+      if (localConvs && localConvs.length > 0) {
+        setAllConversations(localConvs);
+      }
+
+      // 2. Fetch all real DB conversations from Supabase
+      const { conversations: dbConvs } = await getAllAdminConversations();
+      if (dbConvs && dbConvs.length > 0) {
+        const formatted: ChatConversation[] = dbConvs.map((c) => ({
+          id: c.id,
+          roomId: c.room_id,
+          roomTitle: c.room?.title || 'Room Listing',
+          roomTitleNp: c.room?.title_np,
+          roomImage: c.room?.images?.[0],
+          renterId: c.renter_id,
+          renterName: c.renter_profile?.name || 'Student / Renter',
+          ownerId: c.owner_id,
+          ownerName: c.owner_profile?.name || 'Room Lister',
+          ownerPhone: c.owner_profile?.phone,
+          lastMessage: c.last_message
+            ? {
+                id: c.last_message.id,
+                senderId: c.last_message.sender_id,
+                senderName:
+                  c.last_message.sender_id === c.owner_id
+                    ? c.owner_profile?.name || 'Owner'
+                    : c.renter_profile?.name || 'Student',
+                senderRole: c.last_message.sender_id === c.owner_id ? 'owner' : 'renter',
+                text: c.last_message.content,
+                timestamp: new Date(c.last_message.created_at).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+                isSelf: false,
+                roomId: c.room_id,
+                conversationId: c.id,
+              }
+            : undefined,
+          updatedAt: c.created_at,
+        }));
+        setAllConversations(formatted);
+      }
+    };
+
+    fetchPlatformConversations();
     const unsub = subscribeToLiveRoomChat('*', () => {
-      const convs = getAllConversations();
-      setAllConversations(convs);
+      fetchPlatformConversations();
     });
     return () => unsub();
   }, []);
@@ -108,11 +155,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Sync messages when selected conversation changes
   React.useEffect(() => {
     if (selectedChatConv) {
-      setChatMessages(getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId));
+      if (isValidUUID(selectedChatConv.id)) {
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', selectedChatConv.id)
+          .order('created_at', { ascending: true })
+          .then(({ data }) => {
+            if (data && data.length > 0) {
+              setChatMessages(
+                data.map((m: any) => ({
+                  id: m.id,
+                  senderId: m.sender_id,
+                  senderName:
+                    m.sender_id === selectedChatConv.ownerId
+                      ? selectedChatConv.ownerName
+                      : selectedChatConv.renterName,
+                  senderRole: m.sender_id === selectedChatConv.ownerId ? 'owner' : 'renter',
+                  text: m.content || m.message || '',
+                  timestamp: new Date(m.created_at).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                  isSelf: false,
+                  roomId: selectedChatConv.roomId,
+                  conversationId: selectedChatConv.id,
+                }))
+              );
+            } else {
+              setChatMessages(
+                getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
+              );
+            }
+          });
+      } else {
+        setChatMessages(
+          getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
+        );
+      }
+
       const unsub = subscribeToLiveRoomChat(
         selectedChatConv.roomId,
         () => {
-          setChatMessages(getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId));
+          if (isValidUUID(selectedChatConv.id)) {
+            supabase
+              .from('messages')
+              .select('*')
+              .eq('conversation_id', selectedChatConv.id)
+              .order('created_at', { ascending: true })
+              .then(({ data }) => {
+                if (data && data.length > 0) {
+                  setChatMessages(
+                    data.map((m: any) => ({
+                      id: m.id,
+                      senderId: m.sender_id,
+                      senderName:
+                        m.sender_id === selectedChatConv.ownerId
+                          ? selectedChatConv.ownerName
+                          : selectedChatConv.renterName,
+                      senderRole: m.sender_id === selectedChatConv.ownerId ? 'owner' : 'renter',
+                      text: m.content || m.message || '',
+                      timestamp: new Date(m.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }),
+                      isSelf: false,
+                      roomId: selectedChatConv.roomId,
+                      conversationId: selectedChatConv.id,
+                    }))
+                  );
+                }
+              });
+          } else {
+            setChatMessages(
+              getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
+            );
+          }
         },
         selectedChatConv.renterId
       );
