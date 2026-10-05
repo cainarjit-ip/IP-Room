@@ -156,8 +156,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       onOpenBookingContract(notif.data.bookingId);
     } else if (notif.type === 'booking_inquiry' && onOpenOwnerDashboard) {
       onOpenOwnerDashboard();
-    } else if (notif.type === 'chat_message' && notif.data?.roomId && onOpenChatWithRoom) {
-      onOpenChatWithRoom(notif.data.roomId, notif.data?.conversationId);
+    } else if (notif.type === 'chat_message' && onOpenChatWithRoom) {
+      const targetRoomId =
+        notif.data?.roomId ||
+        (notif as any).roomId ||
+        notif.data?.bookingId ||
+        (notif as any).reference_id ||
+        '';
+      const targetConvId =
+        notif.data?.conversationId ||
+        (notif as any).conversationId ||
+        undefined;
+      onOpenChatWithRoom(targetRoomId, targetConvId);
     }
   };
 
@@ -333,7 +343,15 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 <div
                   key={notif.id}
                   onClick={() => handleNotificationClick(notif)}
-                  className={`p-3.5 flex items-start gap-3 hover:bg-slate-50 transition cursor-pointer ${
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleNotificationClick(notif);
+                    }
+                  }}
+                  className={`p-3.5 flex items-start gap-3 hover:bg-slate-50 transition cursor-pointer active:scale-[0.99] select-none ${
                     !notif.read ? 'bg-emerald-50/40' : 'bg-white'
                   }`}
                 >
@@ -358,7 +376,13 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                         })}
                       </span>
                       {notif.type === 'chat_message' && (
-                        <span className="text-[10px] text-emerald-700 font-bold hover:underline">
+                        <span
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-full transition border border-emerald-200 shadow-2xs hover:underline cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleNotificationClick(notif);
+                          }}
+                        >
                           {language === 'np' ? 'च्याट खोल्नुहोस् →' : 'Open Chat →'}
                         </span>
                       )}

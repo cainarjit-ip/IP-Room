@@ -1034,15 +1034,102 @@ export default function App() {
           }
         }}
         onOpenChatWithRoom={(roomId, conversationId) => {
-          const found = rooms.find(r => r.id === roomId);
-          if (found) {
-            setActiveChatRoom(found);
-            if (conversationId) {
-              setActiveChatConversation({ id: conversationId, room_id: roomId } as any);
-            } else {
-              setActiveChatConversation(null);
+          const openChat = async () => {
+            // 1. Check in-memory rooms
+            let found = rooms.find(
+              r => r.id === roomId || (roomId && r.id?.toLowerCase() === roomId.toLowerCase())
+            );
+
+            // 2. If not in memory, query Supabase rooms table
+            if (!found && roomId && isValidUUID(roomId)) {
+              try {
+                const { data: dbRoom } = await (supabase
+                  .from('rooms') as any)
+                  .select('*')
+                  .eq('id', roomId)
+                  .maybeSingle();
+
+                if (dbRoom) {
+                  const base = rooms[0] || INITIAL_ROOMS[0];
+                  const mapped: RoomListing = {
+                    ...base,
+                    id: dbRoom.id,
+                    title: dbRoom.title || base.title,
+                    titleNp: dbRoom.title_np || base.titleNp,
+                    price: Number(dbRoom.price) || base.price,
+                    location: dbRoom.location || base.location,
+                    images: Array.isArray(dbRoom.images) && dbRoom.images.length > 0
+                      ? dbRoom.images
+                      : base.images,
+                    owner: {
+                      ...base.owner,
+                      id: dbRoom.owner_id || base.owner.id,
+                      name: base.owner.name || 'Room Landlord',
+                    },
+                    description: dbRoom.description || base.description,
+                    createdAt: dbRoom.created_at || base.createdAt,
+                  };
+                  found = mapped;
+                  setRooms(prev => [mapped, ...prev.filter(r => r.id !== mapped.id)]);
+                }
+              } catch (err) {
+                console.warn('Error fetching room for chat:', err);
+              }
             }
-          }
+
+            // 3. If conversationId is provided, look up the room through the conversation
+            if (!found && conversationId && isValidUUID(conversationId)) {
+              try {
+                const { data: dbConv } = await (supabase.from('conversations') as any)
+                  .select('*, room:rooms(*)')
+                  .eq('id', conversationId)
+                  .maybeSingle();
+
+                if (dbConv?.room) {
+                  const dbRoom = dbConv.room;
+                  const base = rooms[0] || INITIAL_ROOMS[0];
+                  const mapped: RoomListing = {
+                    ...base,
+                    id: dbRoom.id,
+                    title: dbRoom.title || base.title,
+                    titleNp: dbRoom.title_np || base.titleNp,
+                    price: Number(dbRoom.price) || base.price,
+                    location: dbRoom.location || base.location,
+                    images: Array.isArray(dbRoom.images) && dbRoom.images.length > 0
+                      ? dbRoom.images
+                      : base.images,
+                    owner: {
+                      ...base.owner,
+                      id: dbRoom.owner_id || dbConv.owner_id || base.owner.id,
+                      name: base.owner.name || 'Room Landlord',
+                    },
+                    description: dbRoom.description || base.description,
+                    createdAt: dbRoom.created_at || base.createdAt,
+                  };
+                  found = mapped;
+                  setRooms(prev => [mapped, ...prev.filter(r => r.id !== mapped.id)]);
+                }
+              } catch (err) {
+                console.warn('Error fetching conversation room:', err);
+              }
+            }
+
+            // 4. Fallback: if not found, use first room so chat box ALWAYS opens
+            if (!found && rooms.length > 0) {
+              found = rooms[0];
+            }
+
+            if (found) {
+              setActiveChatRoom(found);
+              if (conversationId) {
+                setActiveChatConversation({ id: conversationId, room_id: found.id } as any);
+              } else {
+                setActiveChatConversation(null);
+              }
+            }
+          };
+
+          openChat();
         }}
       />
 

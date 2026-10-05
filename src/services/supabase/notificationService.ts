@@ -294,30 +294,53 @@ export const notifyChatMessage = async (
   });
 };
 
-export const mapNotificationRowToModel = (row: any): AppNotification => ({
-  id: row.id,
-  toUserId: row.user_id || '',
-  toRole: 'all',
-  title: row.title,
-  body: row.message,
-  type:
-    row.type === 'booking_request' || row.type === 'booking_inquiry'
-      ? 'booking_inquiry'
-      : row.type === 'booking_accepted' || row.type === 'booking_confirmed' || row.type === 'booking_approved'
-        ? 'booking_confirmed'
-        : row.type === 'chat_message'
-          ? 'chat_message'
-          : 'system',
-  createdAt: row.created_at || row.timestamp || new Date().toISOString(),
-  read: Boolean(row.is_read || row.read),
-  data: {
-    bookingId: row.type?.startsWith('booking') ? (row.reference_id || row.data?.bookingId) : undefined,
-    roomId: row.data?.roomId || (row.type === 'chat_message' ? row.reference_id : undefined),
-    conversationId: row.data?.conversationId || undefined,
-    senderId: row.data?.senderId || undefined,
-    senderName: row.data?.senderName || undefined,
-  },
-});
+export const mapNotificationRowToModel = (row: any): AppNotification => {
+  let parsedData: any = {};
+  if (typeof row.data === 'string') {
+    try {
+      parsedData = JSON.parse(row.data);
+    } catch (e) {
+      parsedData = {};
+    }
+  } else if (row.data && typeof row.data === 'object') {
+    parsedData = row.data;
+  }
+
+  const roomId =
+    parsedData.roomId ||
+    parsedData.room_id ||
+    (row.type === 'chat_message' ? row.reference_id : undefined);
+
+  const conversationId =
+    parsedData.conversationId ||
+    parsedData.conversation_id ||
+    undefined;
+
+  return {
+    id: row.id,
+    toUserId: row.user_id || '',
+    toRole: 'all',
+    title: row.title,
+    body: row.message,
+    type:
+      row.type === 'booking_request' || row.type === 'booking_inquiry'
+        ? 'booking_inquiry'
+        : row.type === 'booking_accepted' || row.type === 'booking_confirmed' || row.type === 'booking_approved'
+          ? 'booking_confirmed'
+          : row.type === 'chat_message'
+            ? 'chat_message'
+            : 'system',
+    createdAt: row.created_at || row.timestamp || new Date().toISOString(),
+    read: Boolean(row.is_read || row.read),
+    data: {
+      bookingId: row.type?.startsWith('booking') ? (row.reference_id || parsedData.bookingId) : undefined,
+      roomId: roomId,
+      conversationId: conversationId,
+      senderId: parsedData.senderId || parsedData.sender_id || undefined,
+      senderName: parsedData.senderName || parsedData.sender_name || undefined,
+    },
+  };
+};
 
 /**
  * Fetch notifications for a user
@@ -441,70 +464,51 @@ export const subscribeToRealtimeNotifications = (
     return () => {};
   }
 
-  let channel: any = null;
-  let isCancelled = false;
+  // Initial load from Supabase
+  supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(25)
+    .then(({ data, error }) => {
+      if (!error && data) {
+        const notifs: AppNotification[] = data.map(mapNotificationRowToModel);
+        onUpdate(notifs);
+      }
+    });
 
-  // Only query Supabase when there is an active authenticated session
-  getAuthenticatedSessionUser().then((authUser) => {
-    if (isCancelled || !authUser || authUser.id !== userId) {
-      return;
-    }
-
-    // Initial load from Supabase with safe error handling
-    supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(25)
-      .then(
-        ({ data, error }) => {
-          if (!isCancelled && !error && data) {
-            const notifs: AppNotification[] = data.map(mapNotificationRowToModel);
-            onUpdate(notifs);
-          }
-        },
-        () => {}
-      );
-
-    // Realtime subscription via Supabase Channel
-    const channelName = `notifs-live-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          // Refresh notifications from Supabase
-          supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(25)
-            .then(
-              ({ data, error }) => {
-                if (!isCancelled && !error && data) {
-                  const refreshed: AppNotification[] = data.map(mapNotificationRowToModel);
-                  onUpdate(refreshed);
-                }
-              },
-              () => {}
-            );
-        }
-      )
-      .subscribe();
-  });
+  // Realtime subscription via Supabase Channel
+  const channelName = `notifs-live-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const channel = supabase
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      },
+      () => {
+        // Refresh notifications from Supabase
+        supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(25)
+          .then(({ data }) => {
+            if (data) {
+              const refreshed: AppNotification[] = data.map(mapNotificationRowToModel);
+              onUpdate(refreshed);
+            }
+          });
+      }
+    )
+    .subscribe();
 
   return () => {
-    isCancelled = true;
-    if (channel) {
-      supabase.removeChannel(channel);
-    }
+    supabase.removeChannel(channel);
   };
 };
