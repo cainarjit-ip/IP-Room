@@ -381,72 +381,65 @@ export default function App() {
       localStorage.removeItem('iproom_notifs_all');
     } catch (e) {}
 
-    // CRITICAL: If no user is logged in, notification bar MUST NOT show any messages!
-    if (!currentUser?.id || !isValidUUID(currentUser.id)) {
-      setNotifications([]);
-      return;
-    }
+    const currentUserId = currentUser?.id || 'guest_user';
 
-    // 1. Initial load from user-specific local queue
+    // 1. Initial load from user-specific and role-specific local queues
     try {
-      const userQueueKey = `iproom_notifs_user_${currentUser.id}`;
-      const cached = JSON.parse(localStorage.getItem(userQueueKey) || '[]');
-      if (Array.isArray(cached)) {
-        setNotifications(cached);
-      }
+      const userQueueKey = `iproom_notifs_user_${currentUserId}`;
+      const roleQueueKey = `iproom_notifs_role_${activeRole}`;
+      const userCached = JSON.parse(localStorage.getItem(userQueueKey) || '[]');
+      const roleCached = JSON.parse(localStorage.getItem(roleQueueKey) || '[]');
+      
+      const combined = [...userCached, ...roleCached].filter((n, idx, arr) => 
+        arr.findIndex(item => item.id === n.id) === idx &&
+        (n.toRole === 'all' || n.toRole === activeRole || n.toUserId === currentUserId || n.toUserId === 'all')
+      );
+      setNotifications(combined);
     } catch (e) {
       setNotifications([]);
     }
 
     // 2. Real-time Supabase push notifications from database
     let unsubscribeNotifications: (() => void) | null = null;
-    unsubscribeNotifications = subscribeToRealtimeNotifications(
-      activeRole,
-      currentUser.id,
-      incomingNotifs => {
-        if (incomingNotifs.length > 0) {
-          // Strictly for current user
-          const userOnly = incomingNotifs.filter(
-            n => !n.toUserId || n.toUserId === 'all' || n.toUserId === currentUser.id
-          );
-          setNotifications(userOnly);
-          try {
-            localStorage.setItem(
-              `iproom_notifs_user_${currentUser.id}`,
-              JSON.stringify(userOnly)
+    if (currentUser?.id && isValidUUID(currentUser.id)) {
+      unsubscribeNotifications = subscribeToRealtimeNotifications(
+        activeRole,
+        currentUser.id,
+        incomingNotifs => {
+          if (incomingNotifs.length > 0) {
+            const userOnly = incomingNotifs.filter(
+              n => !n.toUserId || n.toUserId === 'all' || n.toUserId === currentUser.id || n.toRole === activeRole || n.toRole === 'all'
             );
-          } catch (e) {}
+            setNotifications(prev => {
+              const merged = [...userOnly, ...prev.filter(p => !userOnly.some(u => u.id === p.id))];
+              try {
+                localStorage.setItem(`iproom_notifs_user_${currentUserId}`, JSON.stringify(merged.slice(0, 30)));
+              } catch (e) {}
+              return merged;
+            });
+          }
         }
-      }
-    );
+      );
+    }
 
-    // 3. Foreground listener for real-time in-app broadcasts (strictly filtered for recipient)
+    // 3. Foreground listener for real-time in-app broadcasts
     let unsubscribeForeground: (() => void) | null = null;
     setupForegroundFCMListener(incomingNotif => {
-      // Never notify the sender who triggered the action from this device/session!
+      // Do not notify if sender is the same user and not targeted to the active role
       if (
-        incomingNotif.senderSessionId &&
-        incomingNotif.senderSessionId === CURRENT_CLIENT_SESSION_ID
-      ) {
-        return;
-      }
-      if (
-        currentUser.id &&
+        currentUser?.id &&
         incomingNotif.data?.senderId &&
-        incomingNotif.data.senderId === currentUser.id
-      ) {
-        return;
-      }
-      if (
-        currentUser.name &&
-        incomingNotif.data?.senderName &&
-        incomingNotif.data.senderName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()
+        incomingNotif.data.senderId === currentUser.id &&
+        incomingNotif.toRole !== activeRole
       ) {
         return;
       }
 
-      // Notification must strictly match current user
-      if (incomingNotif.toUserId && incomingNotif.toUserId !== 'all' && incomingNotif.toUserId !== currentUser.id) {
+      // Notification must match active role or current user
+      const matchesRole = !incomingNotif.toRole || incomingNotif.toRole === 'all' || incomingNotif.toRole === activeRole;
+      const matchesUser = !incomingNotif.toUserId || incomingNotif.toUserId === 'all' || incomingNotif.toUserId === currentUserId;
+
+      if (!matchesRole && !matchesUser) {
         return;
       }
 
@@ -457,9 +450,15 @@ export default function App() {
         ];
         try {
           localStorage.setItem(
-            `iproom_notifs_user_${currentUser.id}`,
+            `iproom_notifs_user_${currentUserId}`,
             JSON.stringify(updated.slice(0, 30))
           );
+          if (incomingNotif.toRole) {
+            localStorage.setItem(
+              `iproom_notifs_role_${incomingNotif.toRole}`,
+              JSON.stringify(updated.slice(0, 30))
+            );
+          }
         } catch (e) {}
         return updated;
       });

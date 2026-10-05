@@ -59,10 +59,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   // Listen to in-app foreground notifications for floating toast banner (ONLY for recipient)
   useEffect(() => {
     const unsubscribe = addNotificationListener((notif) => {
-      // 1. NEVER show a notification to the sender who triggered the action!
-      if (notif.senderSessionId && notif.senderSessionId === CURRENT_CLIENT_SESSION_ID) {
-        return;
-      }
+      // 1. Never show a toast to the sender for their own message
       if (currentUser?.id && notif.data?.senderId && notif.data.senderId === currentUser.id) {
         return;
       }
@@ -74,17 +71,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         return;
       }
 
-      // 2. Notification must strictly match the recipient's active role
+      // 2. Notification must match the recipient's active role or be for all
       if (notif.toRole !== 'all' && notif.toRole !== activeRole) {
         return;
       }
 
-      // 3. If directed to a specific user ID, ensure it matches current user
+      // 3. If directed to a specific user ID, ensure it matches current user or current role
       if (notif.toUserId && notif.toUserId !== 'all') {
-        if (currentUser?.id && notif.toUserId !== currentUser.id) {
-          return;
-        }
-        if (!currentUser?.id && notif.toRole === 'owner') {
+        if (currentUser?.id && notif.toUserId !== currentUser.id && notif.toRole !== activeRole) {
           return;
         }
       }
@@ -240,7 +234,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         aria-label="Open notifications"
       >
         <Bell className="w-5 h-5 transition-transform duration-200 hover:rotate-12" />
-        {currentUser && unreadCount > 0 && (
+        {unreadCount > 0 && (
           <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-emerald-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white animate-pulse shadow-xs">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
@@ -259,7 +253,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               </h3>
             </div>
             <div className="flex items-center gap-2">
-              {currentUser && unreadCount > 0 && (
+              {unreadCount > 0 && (
                 <span className="text-[10px] bg-emerald-950 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-800">
                   {unreadCount} unread
                 </span>
@@ -301,46 +295,33 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
           {/* Notification List */}
           <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-            {!currentUser ? (
-              /* CLEAN EMPTY STATE BEFORE SIGNING IN: No unnecessary SMS or mock messages! */
+            {notifications.length === 0 ? (
               <div className="py-8 px-6 text-center text-xs space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto border border-emerald-100 shadow-2xs">
                   <Bell className="w-6 h-6 text-emerald-600" />
                 </div>
                 <div className="space-y-1">
                   <p className="font-bold text-slate-800 text-sm">
-                    {language === 'np' ? 'कृपया लग-इन गर्नुहोस्' : 'Sign in to view notifications'}
+                    {language === 'np' ? 'कुनै नयाँ सूचना छैन' : 'No notifications yet'}
                   </p>
                   <p className="text-[11px] text-slate-500 leading-relaxed max-w-xs mx-auto">
                     {language === 'np'
-                      ? 'तपाईंको नयाँ कोठा सोधपुछ, च्याट सन्देश र बुकिङ अलर्टहरू हेर्न कृपया आफ्नो खातामा लग-इन गर्नुहोस्।'
-                      : 'Sign in to see incoming student inquiries, landlord replies, and real-time chat messages.'}
+                      ? 'च्याट सन्देश, कोठा सोधपुछ र बुकिङ सूचनाहरू यहाँ देखा पर्नेछन्।'
+                      : 'Chat messages, room inquiries, and booking updates will appear here.'}
                   </p>
                 </div>
-                {onOpenAuthModal && (
+                {!currentUser && onOpenAuthModal && (
                   <button
                     type="button"
                     onClick={() => {
                       setIsOpen(false);
                       onOpenAuthModal();
                     }}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer mt-1"
                   >
                     <span>{language === 'np' ? 'लग-इन / दर्ता' : 'Sign In / Register'}</span>
                   </button>
                 )}
-              </div>
-            ) : notifications.length === 0 ? (
-              <div className="py-10 text-center text-xs text-slate-400 space-y-1">
-                <Bell className="w-8 h-8 text-slate-200 mx-auto" />
-                <p className="font-semibold text-slate-600">
-                  {language === 'np' ? 'कुनै नयाँ सूचना छैन' : 'No notifications yet'}
-                </p>
-                <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
-                  {language === 'np'
-                    ? 'च्याट सन्देश, कोठा सोधपुछ र बुकिङ सूचनाहरू यहाँ देखा पर्नेछन्।'
-                    : 'Chat messages, room inquiries, and booking updates will appear here.'}
-                </p>
               </div>
             ) : (
               notifications.map((notif) => (

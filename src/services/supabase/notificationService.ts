@@ -138,8 +138,8 @@ export const sendPushNotification = async (
     createdAt: now,
   };
 
-  // DO NOT call notifyInAppListeners on the sender's own window!
-  // The sender who produced the event should NOT be alerted with their own message.
+  // Dispatch to local in-app listeners so the active tab updates the notification bell and displays toast
+  notifyInAppListeners(appNotif);
 
   // Broadcast globally over Supabase Realtime WebSockets to remote clients/devices
   try {
@@ -153,11 +153,17 @@ export const sendPushNotification = async (
 
   // Save to role-specific and user-specific local queue so recipient receives it when viewing their dashboard/role
   try {
-    if (appNotif.toUserId && isValidUUID(appNotif.toUserId)) {
+    if (appNotif.toUserId) {
       const queueKey = `iproom_notifs_user_${appNotif.toUserId}`;
       const existing = JSON.parse(localStorage.getItem(queueKey) || '[]');
       const updated = [appNotif, ...existing.filter((n: any) => n.id !== appNotif.id)].slice(0, 30);
       localStorage.setItem(queueKey, JSON.stringify(updated));
+    }
+    if (appNotif.toRole) {
+      const roleQueueKey = `iproom_notifs_role_${appNotif.toRole}`;
+      const existingRole = JSON.parse(localStorage.getItem(roleQueueKey) || '[]');
+      const updatedRole = [appNotif, ...existingRole.filter((n: any) => n.id !== appNotif.id)].slice(0, 30);
+      localStorage.setItem(roleQueueKey, JSON.stringify(updatedRole));
     }
   } catch (e) {
     // ignore local storage error
