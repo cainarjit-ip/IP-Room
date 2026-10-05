@@ -11,7 +11,7 @@ export const translations = {
     savedWishlist: 'Saved Rooms',
     listYourRoom: '+ List Your Room',
     switchRole: 'Switch Role (Demo):',
-    roleStudent: 'Student / Renter',
+    roleStudent: 'Renter',
     roleOwner: 'Room Owner',
     roleAdmin: 'Admin Moderator',
     
@@ -192,7 +192,7 @@ export const translations = {
     savedWishlist: 'बचत गरिएका कोठाहरू',
     listYourRoom: '+ कोठा भाडामा राख्नुहोस्',
     switchRole: 'भूमिका छान्नुहोस् (डेमो):',
-    roleStudent: 'विद्यार्थी / भाडावाल',
+    roleStudent: 'भाडावाल',
     roleOwner: 'घरधनी / कोठा धनी',
     roleAdmin: 'वेबसाइट एडमिन',
 

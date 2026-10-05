@@ -40,7 +40,7 @@ interface NavbarProps {
   onSignOut: () => void;
   notifications?: AppNotification[];
   onOpenBookingContract?: (bookingId: string) => void;
-  onOpenChatWithRoom?: (roomId: string, conversationId?: string) => void;
+  onOpenChatWithRoom?: (roomId: string, conversationId?: string, senderName?: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -138,9 +138,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? 'bg-emerald-600 text-white shadow-xs font-bold'
                       : 'text-slate-300 hover:text-white')
                   }
-                  title={currentUser ? 'Student Account Active' : 'Sign in as Student'}
+                  title={currentUser ? 'Renter Account Active' : 'Sign in as Renter'}
                 >
-                  <span>🎓</span>
+                  <span>🏠</span>
                   <span className="truncate max-w-[85px] sm:max-w-none">{t.roleStudent}</span>
                   {currentUser && activeRole === 'renter' && (
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse shrink-0" />
@@ -395,7 +395,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <p className="font-bold text-slate-900 truncate">{currentUser.name}</p>
                         <p className="text-[11px] text-slate-500 truncate">{currentUser.email}</p>
                         <span className="inline-block mt-1 text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded capitalize">
-                          {currentUser.role === 'renter' ? 'Student / Renter' : currentUser.role === 'owner' ? 'Room Owner' : 'Administrator'}
+                          {currentUser.role === 'renter' ? (language === 'np' ? 'भाडावाल' : 'Renter') : currentUser.role === 'owner' ? 'Room Owner' : 'Administrator'}
                         </span>
                       </div>
 
@@ -726,7 +726,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <h3 className="font-bold text-slate-900 truncate">{currentUser.name}</h3>
                   <p className="text-sm text-slate-500 truncate">{currentUser.email}</p>
                   <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
-                    {language === 'np' ? 'विद्यार्थी / भाडामा बस्ने' : 'Student / Renter'}
+                    {language === 'np' ? 'भाडावाल' : 'Renter'}
                   </span>
                 </div>
               </section>

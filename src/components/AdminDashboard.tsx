@@ -996,7 +996,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Search className="w-4 h-4 text-slate-400 ml-2" />
             <input
               type="text"
-              placeholder="Search chat by room title, student name, or landlord name..."
+              placeholder="Search chat by room title, renter, or landlord name..."
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
               className="w-full text-xs bg-transparent focus:outline-none text-slate-900"
@@ -1103,7 +1103,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-1">
-                          <span>Student: <strong>{selectedChatConv.renterName}</strong></span>
+                          <span>Renter: <strong>{selectedChatConv.renterName}</strong></span>
                           <span>·</span>
                           <span>Owner: <strong>{selectedChatConv.ownerName}</strong></span>
                           {selectedChatConv.ownerPhone && (

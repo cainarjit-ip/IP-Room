@@ -132,7 +132,7 @@ export const RoommateFinder: React.FC<RoommateFinderProps> = ({
           {/* Keyword Search */}
           <div>
             <label className="font-semibold text-slate-700 block mb-1">
-              Search by Student Name or Campus
+              Search by Renter or Campus
             </label>
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />

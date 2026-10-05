@@ -1033,7 +1033,7 @@ export default function App() {
             setViewingContractBooking(found);
           }
         }}
-        onOpenChatWithRoom={(roomId, conversationId) => {
+        onOpenChatWithRoom={(roomId: string, conversationId?: string, senderName?: string) => {
           const openChat = async () => {
             // 1. Check in-memory rooms
             let found = rooms.find(
@@ -1122,7 +1122,12 @@ export default function App() {
             if (found) {
               setActiveChatRoom(found);
               if (conversationId) {
-                setActiveChatConversation({ id: conversationId, room_id: found.id } as any);
+                setActiveChatConversation({
+                  id: conversationId,
+                  room_id: found.id,
+                  renter_name: senderName,
+                  renter_profile: senderName ? { name: senderName } : undefined,
+                } as any);
               } else {
                 setActiveChatConversation(null);
               }

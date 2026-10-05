@@ -271,7 +271,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                 }`}
               >
-                <span>🎓 {t.roleStudent}</span>
+                <span>🏠 {t.roleStudent}</span>
                 {role === 'renter' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
               </button>
 
@@ -340,19 +340,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   {mode === 'signup'
                     ? language === 'np'
                       ? role === 'renter'
-                        ? 'Google बाट विद्यार्थी दर्ता गर्नुहोस्'
+                        ? 'Google बाट भाडावाल दर्ता गर्नुहोस्'
                         : 'Google बाट घरधनी दर्ता गर्नुहोस्'
                       : role === 'renter'
-                      ? 'Sign Up with Google as Student'
+                      ? 'Sign Up with Google as Renter'
                       : 'Sign Up with Google as Room Owner'
                     : language === 'np'
                     ? role === 'renter'
-                      ? 'Google बाट विद्यार्थी लगइन'
+                      ? 'Google बाट भाडावाल लगइन'
                       : role === 'owner'
                       ? 'Google बाट घरधनी लगइन'
                       : 'Google बाट एडमिन लगइन'
                     : role === 'renter'
-                    ? 'Continue with Google (Student)'
+                    ? 'Continue with Google (Renter)'
                     : role === 'owner'
                     ? 'Continue with Google (Room Owner)'
                     : 'Continue with Google (Admin)'}

@@ -27,7 +27,7 @@ interface NotificationCenterProps {
   notifications: AppNotification[];
   onOpenBookingContract?: (bookingId: string) => void;
   onOpenOwnerDashboard?: () => void;
-  onOpenChatWithRoom?: (roomId: string, conversationId?: string) => void;
+  onOpenChatWithRoom?: (roomId: string, conversationId?: string, senderName?: string) => void;
   onOpenAuthModal?: () => void;
 }
 
@@ -167,7 +167,11 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         notif.data?.conversationId ||
         (notif as any).conversationId ||
         undefined;
-      onOpenChatWithRoom(targetRoomId, targetConvId);
+      const senderName =
+        notif.data?.senderName ||
+        (notif as any).senderName ||
+        undefined;
+      onOpenChatWithRoom(targetRoomId, targetConvId, senderName);
     }
   };
 

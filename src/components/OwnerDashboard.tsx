@@ -208,8 +208,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       </div>
 
       {/* Owner Dashboard Tabs */}
-      <div className="flex border-b border-slate-200">
-        <div className="flex gap-2">
+      <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <div className="flex gap-2 min-w-max pb-0.5">
 
           {/* Listings Tab */}
           <button
@@ -411,7 +411,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 const targetRoom = rooms.find((r) => r.id === conv.room_id) || conv.room;
                 const renterName =
                   conv.renter_profile?.name ||
-                  (language === 'np' ? 'विद्यार्थी सोधपुछ' : 'Prospective Student');
+                  (language === 'np' ? 'भाडावाल' : 'Renter');
                 const lastMsg = conv.last_message;
                 const unreadCount = conv.unread_count || 0;
 
@@ -449,7 +449,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           <p className="text-[11px] text-slate-500 truncate">
                             {conv.renter_profile?.phone ||
                               conv.renter_profile?.email ||
-                              (language === 'np' ? 'प्रमाणित विद्यार्थी' : 'Verified Student')}
+                              (language === 'np' ? 'प्रमाणित भाडावाल' : 'Verified Renter')}
                           </p>
                         </div>
                       </div>
@@ -564,78 +564,78 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       ) : (
         <div className="space-y-8">
 
-          {/* Metrics Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Metrics Row (2 columns on mobile instead of 1 vertical column) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
 
             {/* Monthly Earnings */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-semibold">
+            <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-500 mb-1.5 sm:mb-2">
+                <span className="text-[11px] sm:text-xs font-semibold line-clamp-1">
                   {t.monthlyEarnings}
                 </span>
-                <DollarSign className="w-4 h-4 text-emerald-600" />
+                <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
               </div>
 
-              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+              <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 tabular-nums">
                 रु. {totalRentCollected.toLocaleString('en-IN')}
               </div>
 
-              <span className="text-[11px] text-emerald-700 font-medium">
-                ↑ +18% vs previous month
+              <span className="text-[10px] sm:text-[11px] text-emerald-700 font-medium mt-1 truncate">
+                ↑ +18% vs prev
               </span>
             </div>
 
             {/* Listings */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-semibold">
+            <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-500 mb-1.5 sm:mb-2">
+                <span className="text-[11px] sm:text-xs font-semibold line-clamp-1">
                   {t.myListings}
                 </span>
-                <Building className="w-4 h-4 text-blue-600" />
+                <Building className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 shrink-0" />
               </div>
 
-              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+              <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 tabular-nums">
                 {myRooms.length} Active
               </div>
 
-              <span className="text-[11px] text-slate-500">
-                Across 3 municipalities
+              <span className="text-[10px] sm:text-[11px] text-slate-500 mt-1 truncate">
+                Across municipalities
               </span>
             </div>
 
             {/* Occupancy */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-semibold">
+            <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-500 mb-1.5 sm:mb-2">
+                <span className="text-[11px] sm:text-xs font-semibold line-clamp-1">
                   {t.occupancyRate}
                 </span>
-                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
               </div>
 
-              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+              <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 tabular-nums">
                 {occupancyRate}
               </div>
 
-              <span className="text-[11px] text-emerald-700 font-medium">
-                Near TU admission peak
+              <span className="text-[10px] sm:text-[11px] text-emerald-700 font-medium mt-1 truncate">
+                Near TU peak
               </span>
             </div>
 
             {/* Inquiries */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-semibold">
+            <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-500 mb-1.5 sm:mb-2">
+                <span className="text-[11px] sm:text-xs font-semibold line-clamp-1">
                   {t.totalInquiries}
                 </span>
-                <Users className="w-4 h-4 text-purple-600" />
+                <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600 shrink-0" />
               </div>
 
-              <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
+              <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 tabular-nums">
                 {totalInquiries}
               </div>
 
-              <span className="text-[11px] text-purple-700 font-medium">
-                Avg response time: 15 mins
+              <span className="text-[10px] sm:text-[11px] text-purple-700 font-medium mt-1 truncate">
+                Avg: 15 mins
               </span>
             </div>
           </div>
