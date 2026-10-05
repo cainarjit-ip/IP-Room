@@ -3,6 +3,7 @@ import { Language } from '../types';
 import { getTranslation } from '../data/translations';
 import { ShieldCheck, MapPin, Heart, Lock, FileText } from 'lucide-react';
 import { LegalModal } from './LegalModal';
+import ipRoomLogo from '../assets/images/ip_room_logo_1791190756404.jpg';
 
 interface FooterProps {
   language: Language;
@@ -25,9 +26,13 @@ export const Footer: React.FC<FooterProps> = ({ language, onNavigateTab }) => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           {/* Brand Info */}
           <div className="space-y-3 md:col-span-1">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center font-black text-base shadow-sm">
-                IP
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-full p-0.5 bg-gradient-to-tr from-amber-600/40 via-emerald-600/30 to-amber-500/50 shadow-md shrink-0 flex items-center justify-center">
+                <img
+                  src={ipRoomLogo}
+                  alt="IP Room Rent Nepal"
+                  className="w-full h-full object-cover rounded-full"
+                />
               </div>
               <span className="font-display font-extrabold text-lg text-white">
                 IP Room

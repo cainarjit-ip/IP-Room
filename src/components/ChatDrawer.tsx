@@ -237,13 +237,20 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
       const { conversation: conv, error: convErr } = await getOrCreateConversation(
         room.id,
         renterId,
-        ownerId
+        ownerId,
+        room
       );
 
       if (!isMounted) return;
 
       if (convErr || !conv) {
-        setErrorMessage(convErr || 'Failed to start conversation with the room owner.');
+        setErrorMessage(
+          convErr?.includes('foreign key')
+            ? language === 'np'
+              ? 'यो कोठाको च्याट सेवा सक्रिय हुन केही समय लाग्नेछ। कृपया पुनः प्रयास गर्नुहोस्।'
+              : 'Could not connect to this room chat. Please try again.'
+            : convErr || 'Failed to start conversation with the room owner.'
+        );
         setIsLoading(false);
         return;
       }

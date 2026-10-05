@@ -3,6 +3,7 @@ import { Language, UserRole, UserProfile } from '../types';
 import { getTranslation } from '../data/translations';
 import { NotificationCenter } from './NotificationCenter';
 import { AppNotification } from '../services/supabase/notificationService';
+import ipRoomLogo from '../assets/images/ip_room_logo_1791190756404.jpg';
 import {
   Home,
   Heart,
@@ -248,8 +249,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => navigateTo('browse')}
                 className="flex items-center gap-2.5 text-left group shrink-0"
               >
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-emerald-700 text-white flex items-center justify-center font-black text-lg tracking-tight shadow-sm group-hover:bg-emerald-800 transition-colors shrink-0">
-                  IP
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full p-0.5 bg-gradient-to-tr from-amber-600/40 via-emerald-600/30 to-amber-500/50 shadow-md group-hover:scale-105 transition-transform shrink-0 flex items-center justify-center">
+                  <img
+                    src={ipRoomLogo}
+                    alt="IP Room Rent Nepal"
+                    className="w-full h-full object-cover rounded-full shadow-xs"
+                  />
                 </div>
                 <div className="min-w-0">
                   <span className="font-display font-extrabold text-base xs:text-lg sm:text-xl text-slate-900 tracking-tight block leading-tight whitespace-nowrap">

@@ -481,24 +481,20 @@ export const fetchRoomsFromSupabase = async (): Promise<RoomListing[]> => {
     // Graceful offline fallback
   }
 
-  // Retrieve locally published rooms from both IndexedDB and LocalStorage
+  // If remote rooms are successfully fetched from Supabase, they are the primary source of truth
+  if (remoteList.length > 0) {
+    // Keep local persistent store clean and in sync with authoritative remote rooms
+    syncAllRoomsLocally(remoteList).catch(() => {});
+    return remoteList;
+  }
+
+  // Fallback to locally published rooms from IndexedDB / LocalStorage only when offline
   let localList: RoomListing[] = [];
   try {
     localList = await getLocalStoredRooms();
   } catch (e) {}
 
-  // Deduplicate by room id: keep all rooms, with local updates preserved
-  const mergedMap = new Map<string, RoomListing>();
-  remoteList.forEach(r => mergedMap.set(r.id, r));
-  localList.forEach(r => mergedMap.set(r.id, r));
-
-  const allRooms = Array.from(mergedMap.values());
-  // Sync back to local persistent store so all rooms are readily available offline
-  if (allRooms.length > 0) {
-    syncAllRoomsLocally(allRooms).catch(() => {});
-  }
-
-  return allRooms;
+  return localList;
 };
 
 export const saveRoomToSupabase = async (room: RoomListing): Promise<boolean> => {

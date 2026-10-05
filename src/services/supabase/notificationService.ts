@@ -441,51 +441,70 @@ export const subscribeToRealtimeNotifications = (
     return () => {};
   }
 
-  // Initial load from Supabase
-  supabase
-    .from('notifications')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(25)
-    .then(({ data, error }) => {
-      if (!error && data) {
-        const notifs: AppNotification[] = data.map(mapNotificationRowToModel);
-        onUpdate(notifs);
-      }
-    });
+  let channel: any = null;
+  let isCancelled = false;
 
-  // Realtime subscription via Supabase Channel
-  const channelName = `notifs-live-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const channel = supabase
-    .channel(channelName)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${userId}`,
-      },
-      () => {
-        // Refresh notifications from Supabase
-        supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(25)
-          .then(({ data }) => {
-            if (data) {
-              const refreshed: AppNotification[] = data.map(mapNotificationRowToModel);
-              onUpdate(refreshed);
-            }
-          });
-      }
-    )
-    .subscribe();
+  // Only query Supabase when there is an active authenticated session
+  getAuthenticatedSessionUser().then((authUser) => {
+    if (isCancelled || !authUser || authUser.id !== userId) {
+      return;
+    }
+
+    // Initial load from Supabase with safe error handling
+    supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(25)
+      .then(
+        ({ data, error }) => {
+          if (!isCancelled && !error && data) {
+            const notifs: AppNotification[] = data.map(mapNotificationRowToModel);
+            onUpdate(notifs);
+          }
+        },
+        () => {}
+      );
+
+    // Realtime subscription via Supabase Channel
+    const channelName = `notifs-live-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          // Refresh notifications from Supabase
+          supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(25)
+            .then(
+              ({ data, error }) => {
+                if (!isCancelled && !error && data) {
+                  const refreshed: AppNotification[] = data.map(mapNotificationRowToModel);
+                  onUpdate(refreshed);
+                }
+              },
+              () => {}
+            );
+        }
+      )
+      .subscribe();
+  });
 
   return () => {
-    supabase.removeChannel(channel);
+    isCancelled = true;
+    if (channel) {
+      supabase.removeChannel(channel);
+    }
   };
 };

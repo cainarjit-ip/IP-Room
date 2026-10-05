@@ -46,6 +46,10 @@ export const RoomCard: React.FC<RoomCardProps> = ({
           src={mainImage}
           alt={room.title}
           referrerPolicy="no-referrer"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src =
+              'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80';
+          }}
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
         />
 
