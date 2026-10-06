@@ -16,8 +16,8 @@ export const translations = {
     roleAdmin: 'Admin Moderator',
     
     // Hero Search
-    heroTitle: 'Find Verified Rooms & Flats Near Your Campus in Nepal',
-    heroSubtitle: 'Connecting 150,000+ students and young professionals with verified landlords across all 77 districts with transparent water schedules, eSewa/Khalti booking, and legal digital contracts.',
+    heroTitle: 'Find verified Rooms & Flats Near Your Campus OR Office in Nepal',
+    heroSubtitle: 'Connecting students and young professionals with verified landlords across all 77 districts with transparent water schedules, eSewa/Khalti booking, and legal digital contracts.',
     selectProvince: 'Select Province',
     allProvinces: 'All 7 Provinces',
     selectDistrict: 'Select District',
@@ -197,7 +197,7 @@ export const translations = {
     roleAdmin: 'वेबसाइट एडमिन',
 
     // Hero Search
-    heroTitle: 'नेपालका क्याम्पस तथा कलेज नजिक प्रमाणित कोठाहरू खोज्नुहोस्',
+    heroTitle: 'नेपालमा आफ्नो क्याम्पस वा अफिस नजिक प्रमाणित कोठा र फ्ल्याट खोज्नुहोस्',
     heroSubtitle: 'नेपालका ७ वटै प्रदेश तथा ७७ जिल्लामा विद्यार्थी तथा जागिरेहरूलाई पानीको स्पष्ट तालिका, ईसेवा/खल्ती भुक्तानी र डिजिटल घरबहाल सम्झौताका साथ सुरक्षित कोठा उपलब्ध गराउने मञ्च।',
     selectProvince: 'प्रदेश छान्नुहोस्',
     allProvinces: 'सबै ७ प्रदेश',
