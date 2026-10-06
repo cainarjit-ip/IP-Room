@@ -249,18 +249,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => navigateTo('browse')}
                 className="flex items-center gap-2.5 text-left group shrink-0"
               >
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full p-0.5 bg-gradient-to-tr from-amber-600/40 via-emerald-600/30 to-amber-500/50 shadow-md group-hover:scale-105 transition-transform shrink-0 flex items-center justify-center">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-15 md:h-15 rounded-full p-0.5 bg-gradient-to-tr from-amber-600/50 via-emerald-600/40 to-amber-500/60 shadow-lg group-hover:scale-105 transition-all shrink-0 flex items-center justify-center overflow-hidden ring-2 ring-emerald-500/20">
                   <img
                     src={ipRoomLogo}
                     alt="IP Room Rent Nepal"
-                    className="w-full h-full object-cover rounded-full shadow-xs"
+                    className="w-full h-full object-cover rounded-full shadow-xs scale-110 sm:scale-115 transition-transform duration-200"
                   />
                 </div>
                 <div className="min-w-0">
                   <span className="font-display font-extrabold text-base xs:text-lg sm:text-xl text-slate-900 tracking-tight block leading-tight whitespace-nowrap">
                     IP Room
                   </span>
-                  <span className="text-[9px] xs:text-[10px] sm:text-[11px] text-slate-500 font-medium block leading-tight whitespace-nowrap">
+                  <span className="text-[10px] sm:text-xs text-slate-500 font-medium block leading-tight whitespace-nowrap">
                     {language === 'np' ? 'नेपालको कोठा बजार' : "Nepal's Room Finder"}
                   </span>
                 </div>
