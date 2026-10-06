@@ -1,12 +1,36 @@
 // IP Room Nepal - Service Worker for Web Push Notifications & PWA
-const CACHE_NAME = 'iproom-cache-v1';
+const CACHE_NAME = 'iproom-cache-v2';
+const STATIC_ASSETS = [
+  '/',
+  '/manifest.json',
+  '/og-image.jpg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+  '/apple-touch-icon.png',
+];
 
 self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch(() => {});
+    })
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      )
+    ).then(() => self.clients.claim())
+  );
 });
 
 // Handle real mobile push notification (shows in phone notification bar even when site is closed)
@@ -23,8 +47,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'New Message · IP Room';
   const options = {
     body: data.body || 'You have received a new message regarding your room listing.',
-    icon: '/pwa-192x192.png',
-    badge: '/icon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     vibrate: [100, 50, 100],
     data: {
       url: data.url || '/',

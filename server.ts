@@ -23,8 +23,9 @@ app.get('/api/health', (_req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// Serve static assets built by Vite
+// Serve static assets built by Vite and public directory
 app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // SPA fallback: return index.html for all client-side navigation routes
 app.get('*', (_req, res) => {
