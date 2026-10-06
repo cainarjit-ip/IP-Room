@@ -161,16 +161,22 @@ export const HeroSearch: React.FC<HeroSearchProps> = ({
               <span className="text-xs font-semibold text-slate-600 shrink-0">
                 {t.budgetMonthly}:
               </span>
-              <input
-                type="range"
-                min="4000"
-                max="30000"
-                step="1000"
-                value={maxBudget}
-                onChange={e => onMaxBudgetChange(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
-              />
-              <span className="text-xs font-bold text-emerald-700 font-mono tabular-nums shrink-0 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
+              <div className="flex-1 flex flex-col gap-0.5">
+                <input
+                  type="range"
+                  min="0"
+                  max="300000"
+                  step="5000"
+                  value={maxBudget}
+                  onChange={e => onMaxBudgetChange(Number(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                />
+                <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                  <span>रु. 0</span>
+                  <span>रु. 3,00,000</span>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-700 font-mono tabular-nums shrink-0 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-100 min-w-[125px] text-center">
                 Up to रु. {maxBudget.toLocaleString('en-IN')}
               </span>
             </div>

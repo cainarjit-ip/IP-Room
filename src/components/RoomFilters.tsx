@@ -121,16 +121,16 @@ export const RoomFilters: React.FC<RoomFiltersProps> = ({
         </div>
         <input
           type="range"
-          min="4000"
-          max="35000"
-          step="1000"
+          min="0"
+          max="300000"
+          step="5000"
           value={filters.maxPrice}
           onChange={e => onChange({ maxPrice: Number(e.target.value) })}
           className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
         />
         <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
-          <span>रु. 4,000</span>
-          <span>रु. 35,000+</span>
+          <span>रु. 0</span>
+          <span>रु. 3,00,000</span>
         </div>
       </div>
 

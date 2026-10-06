@@ -485,14 +485,14 @@ export default function App() {
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
   const [selectedRoomType, setSelectedRoomType] = useState('');
   const [selectedCampus, setSelectedCampus] = useState('Tribhuvan University (Central Campus)');
-  const [maxBudget, setMaxBudget] = useState(25000);
+  const [maxBudget, setMaxBudget] = useState(300000);
 
   // Detailed Filter sidebar state
   const [filters, setFilters] = useState({
     roomType: '',
     occupancy: '' as OccupancyPreference | '',
     minPrice: 0,
-    maxPrice: 25000,
+    maxPrice: 300000,
     water24x7: false,
     solarHotWater: false,
     attachedBathroom: false,
@@ -602,12 +602,12 @@ export default function App() {
     setSelectedMunicipality('');
     setSelectedRoomType('');
     setSelectedCampus('');
-    setMaxBudget(25000);
+    setMaxBudget(300000);
     setFilters({
       roomType: '',
       occupancy: '',
       minPrice: 0,
-      maxPrice: 25000,
+      maxPrice: 300000,
       water24x7: false,
       solarHotWater: false,
       attachedBathroom: false,
