@@ -322,6 +322,11 @@ export interface ChatMessage {
   renterId?: string;
   renterName?: string;
   senderSessionId?: string;
+  messageType?: 'text' | 'image';
+  attachmentUrl?: string | null;
+  status?: 'sending' | 'sent' | 'delivered' | 'read';
+  deletedAt?: string | null;
+  createdAt?: string;
 }
 
 export interface ChatConversation {
@@ -338,4 +343,57 @@ export interface ChatConversation {
   lastMessage?: ChatMessage;
   unreadCount?: number;
   updatedAt: string;
+  status?: 'active' | 'archived' | 'blocked';
+  isArchived?: boolean;
+}
+
+export type ChatReportReason =
+  | 'Spam'
+  | 'Fraud'
+  | 'Harassment'
+  | 'Fake listing'
+  | 'Inappropriate content'
+  | 'Other';
+
+export interface ChatReport {
+  id: string;
+  conversation_id: string;
+  message_id?: string | null;
+  reporter_id: string;
+  reported_user_id: string;
+  reason: ChatReportReason;
+  description: string;
+  status: 'pending' | 'investigating' | 'resolved' | 'dismissed';
+  created_at: string;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+  reporter_name?: string;
+  reported_user_name?: string;
+  room_title?: string;
+}
+
+export interface ChatBlock {
+  id: string;
+  blocker_id: string;
+  blocked_id: string;
+  conversation_id?: string | null;
+  created_at: string;
+}
+
+export interface TypingState {
+  userId: string;
+  userName: string;
+  isTyping: boolean;
+  timestamp: number;
+}
+
+export interface ChatParticipant {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  avatar?: string;
+  role: UserRole;
+  online?: boolean;
+  lastSeen?: string;
 }

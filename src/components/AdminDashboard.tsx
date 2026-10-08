@@ -1,16 +1,15 @@
-import React, { useState, useMemo } from 'react';
-import { RoomListing, DisputeTicket, Language, UserProfile, ModerationLogEntry, ListingStatus, ChatConversation, ChatMessage } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { RoomListing, DisputeTicket, Language, UserProfile, ModerationLogEntry, ListingStatus, ChatReport } from '../types';
 import { getTranslation } from '../data/translations';
 import { ListingInspectionModal } from './ListingInspectionModal';
 import { RejectionReasonModal } from './RejectionReasonModal';
-import {
-  getAllConversations,
-  getConversationMessages,
-  subscribeToLiveRoomChat,
-  saveRoomChatMessage,
-  getAllAdminConversations,
-} from '../services/supabase/chatService';
 import { isValidUUID, supabase } from '../lib/supabase';
+import {
+  getAdminChatReports,
+  updateChatReportStatus,
+  deleteMessageSoft,
+  blockUserInChat,
+} from '../services/supabase/chatService';
 import {
   ShieldAlert,
   CheckCircle,
@@ -72,7 +71,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSelectRoom,
 }) => {
   const t = getTranslation(language);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history' | 'chats'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history' | 'chat-reports'>('pending');
+
+  // Chat Moderation & Reports State (Requirement 18)
+  const [chatReports, setChatReports] = useState<ChatReport[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportFilterStatus, setReportFilterStatus] = useState<'all' | 'pending' | 'resolved' | 'dismissed'>('all');
+  const [reportFilterReason, setReportFilterReason] = useState<string>('all');
+  const [reportSearchQuery, setReportSearchQuery] = useState('');
+
+  const loadChatReports = async () => {
+    setReportsLoading(true);
+    const { reports } = await getAdminChatReports();
+    setChatReports(reports);
+    setReportsLoading(false);
+  };
+
+  useEffect(() => {
+    loadChatReports();
+  }, []);
+
+  const handleResolveReport = async (reportId: string) => {
+    await updateChatReportStatus(reportId, 'resolved', currentUser?.id || 'admin');
+    setChatReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'resolved', resolved_at: new Date().toISOString() } : r));
+    showNotification('Chat report marked as resolved.');
+  };
+
+  const handleDismissReport = async (reportId: string) => {
+    await updateChatReportStatus(reportId, 'dismissed', currentUser?.id || 'admin');
+    setChatReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'dismissed', resolved_at: new Date().toISOString() } : r));
+    showNotification('Chat report dismissed.');
+  };
+
+  const handleDeleteReportedMessage = async (messageId: string) => {
+    await deleteMessageSoft(messageId, currentUser?.id);
+    showNotification('Inappropriate message soft-deleted and removed from conversation.');
+  };
+
+  const handleSuspendUser = async (targetUserId: string, targetUserName: string, conversationId?: string) => {
+    await blockUserInChat(currentUser?.id || 'admin', targetUserId, conversationId);
+    showNotification(`User ${targetUserName} suspended & restricted from chat.`);
+  };
+
+  const filteredChatReports = useMemo(() => {
+    return chatReports.filter(rep => {
+      if (reportFilterStatus !== 'all' && rep.status !== reportFilterStatus) return false;
+      if (reportFilterReason !== 'all' && rep.reason !== reportFilterReason) return false;
+      if (reportSearchQuery.trim()) {
+        const q = reportSearchQuery.toLowerCase();
+        const rName = (rep.reporter_name || '').toLowerCase();
+        const uName = (rep.reported_user_name || '').toLowerCase();
+        const rTitle = (rep.room_title || '').toLowerCase();
+        const desc = (rep.description || '').toLowerCase();
+        if (!rName.includes(q) && !uName.includes(q) && !rTitle.includes(q) && !desc.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [chatReports, reportFilterStatus, reportFilterReason, reportSearchQuery]);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,164 +141,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [confirmDeleteRoom, setConfirmDeleteRoom] = useState<RoomListing | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
 
-  // Dispute resolution state
-  const [resolutionText, setResolutionText] = useState('');
-  const [activeDisputeId, setActiveDisputeId] = useState<string | null>(null);
-
-  // Platform-wide Chat Moderation state
-  const [allConversations, setAllConversations] = useState<ChatConversation[]>(() => getAllConversations());
-  const [selectedChatConv, setSelectedChatConv] = useState<ChatConversation | null>(null);
-  const [chatSearch, setChatSearch] = useState('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [adminNoteText, setAdminNoteText] = useState('');
-
-  // Real-time synchronization for platform chats
-  React.useEffect(() => {
-    const fetchPlatformConversations = async () => {
-      // 1. First get local cached conversations
-      const localConvs = getAllConversations();
-      if (localConvs && localConvs.length > 0) {
-        setAllConversations(localConvs);
-      }
-
-      // 2. Fetch all real DB conversations from Supabase
-      const { conversations: dbConvs } = await getAllAdminConversations();
-      if (dbConvs && dbConvs.length > 0) {
-        const formatted: ChatConversation[] = dbConvs.map((c) => ({
-          id: c.id,
-          roomId: c.room_id,
-          roomTitle: c.room?.title || 'Room Listing',
-          roomTitleNp: c.room?.title_np,
-          roomImage: c.room?.images?.[0],
-          renterId: c.renter_id,
-          renterName: c.renter_profile?.name || 'Student / Renter',
-          ownerId: c.owner_id,
-          ownerName: c.owner_profile?.name || 'Room Lister',
-          ownerPhone: c.owner_profile?.phone,
-          lastMessage: c.last_message
-            ? {
-                id: c.last_message.id,
-                senderId: c.last_message.sender_id,
-                senderName:
-                  c.last_message.sender_id === c.owner_id
-                    ? c.owner_profile?.name || 'Owner'
-                    : c.renter_profile?.name || 'Student',
-                senderRole: c.last_message.sender_id === c.owner_id ? 'owner' : 'renter',
-                text: c.last_message.content,
-                timestamp: new Date(c.last_message.created_at).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-                isSelf: false,
-                roomId: c.room_id,
-                conversationId: c.id,
-              }
-            : undefined,
-          updatedAt: c.created_at,
-        }));
-        setAllConversations(formatted);
-      }
-    };
-
-    fetchPlatformConversations();
-    const unsub = subscribeToLiveRoomChat('*', () => {
-      fetchPlatformConversations();
-    });
-    return () => unsub();
-  }, []);
-
-  // Sync messages when selected conversation changes
-  React.useEffect(() => {
-    if (selectedChatConv) {
-      if (isValidUUID(selectedChatConv.id)) {
-        supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', selectedChatConv.id)
-          .order('created_at', { ascending: true })
-          .then(({ data }) => {
-            if (data && data.length > 0) {
-              setChatMessages(
-                data.map((m: any) => ({
-                  id: m.id,
-                  senderId: m.sender_id,
-                  senderName:
-                    m.sender_id === selectedChatConv.ownerId
-                      ? selectedChatConv.ownerName
-                      : selectedChatConv.renterName,
-                  senderRole: m.sender_id === selectedChatConv.ownerId ? 'owner' : 'renter',
-                  text: m.content || m.message || '',
-                  timestamp: new Date(m.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                  isSelf: false,
-                  roomId: selectedChatConv.roomId,
-                  conversationId: selectedChatConv.id,
-                }))
-              );
-            } else {
-              setChatMessages(
-                getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
-              );
-            }
-          });
-      } else {
-        setChatMessages(
-          getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
-        );
-      }
-
-      const unsub = subscribeToLiveRoomChat(
-        selectedChatConv.roomId,
-        () => {
-          if (isValidUUID(selectedChatConv.id)) {
-            supabase
-              .from('messages')
-              .select('*')
-              .eq('conversation_id', selectedChatConv.id)
-              .order('created_at', { ascending: true })
-              .then(({ data }) => {
-                if (data && data.length > 0) {
-                  setChatMessages(
-                    data.map((m: any) => ({
-                      id: m.id,
-                      senderId: m.sender_id,
-                      senderName:
-                        m.sender_id === selectedChatConv.ownerId
-                          ? selectedChatConv.ownerName
-                          : selectedChatConv.renterName,
-                      senderRole: m.sender_id === selectedChatConv.ownerId ? 'owner' : 'renter',
-                      text: m.content || m.message || '',
-                      timestamp: new Date(m.created_at).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }),
-                      isSelf: false,
-                      roomId: selectedChatConv.roomId,
-                      conversationId: selectedChatConv.id,
-                    }))
-                  );
-                }
-              });
-          } else {
-            setChatMessages(
-              getConversationMessages(selectedChatConv.roomId, selectedChatConv.renterId)
-            );
-          }
-        },
-        selectedChatConv.renterId
-      );
-      return () => unsub();
-    } else {
-      setChatMessages([]);
-    }
-  }, [selectedChatConv?.id]);
-
   const showNotification = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
   };
+
+  // Dispute resolution state
+  const [resolutionText, setResolutionText] = useState('');
+  const [activeDisputeId, setActiveDisputeId] = useState<string | null>(null);
 
   // Real-time Moderation Statistics
   const pendingCount = rooms.filter(r => r.status === 'pending').length;
@@ -251,20 +156,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const rejectedCount = rooms.filter(r => r.status === 'rejected').length;
   const suspendedCount = rooms.filter(r => r.status === 'suspended').length;
   const totalCount = rooms.length;
-
-  // Filtered conversations logic for Admin
-  const filteredConversations = useMemo(() => {
-    if (!chatSearch.trim()) return allConversations;
-    const q = chatSearch.toLowerCase();
-    return allConversations.filter(
-      (c) =>
-        c.roomTitle.toLowerCase().includes(q) ||
-        (c.roomTitleNp && c.roomTitleNp.toLowerCase().includes(q)) ||
-        c.renterName.toLowerCase().includes(q) ||
-        c.ownerName.toLowerCase().includes(q) ||
-        (c.lastMessage && c.lastMessage.text.toLowerCase().includes(q))
-    );
-  }, [allConversations, chatSearch]);
 
   // Filtered rooms logic
   const filteredListings = useMemo(() => {
@@ -369,208 +260,112 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{notification}</span>
           </div>
-          <button type="button" onClick={() => setNotification(null)} className="text-emerald-700 hover:text-emerald-950">
-            ✕
-          </button>
         </div>
       )}
 
-      {/* Real-time Dashboard Statistics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
-        <button
-          type="button"
-          onClick={() => setActiveTab('pending')}
-          className={`p-4 rounded-xl border text-left transition ${
-            activeTab === 'pending'
-              ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold">Pending</span>
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
-            {pendingCount}
-          </div>
-          <span className="text-[11px] text-amber-700 font-medium">Needs Verification</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('approved')}
-          className={`p-4 rounded-xl border text-left transition ${
-            activeTab === 'approved'
-              ? 'bg-emerald-500/10 border-emerald-600 ring-2 ring-emerald-500/20'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold">Approved</span>
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
-            {approvedCount}
-          </div>
-          <span className="text-[11px] text-emerald-700 font-medium">Publicly Live</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('rejected')}
-          className={`p-4 rounded-xl border text-left transition ${
-            activeTab === 'rejected'
-              ? 'bg-rose-500/10 border-rose-500 ring-2 ring-rose-500/20'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold">Rejected</span>
-            <XCircle className="w-4 h-4 text-rose-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
-            {rejectedCount}
-          </div>
-          <span className="text-[11px] text-rose-700 font-medium">Non-compliant</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('all')}
-          className={`p-4 rounded-xl border text-left transition ${
-            activeTab === 'all'
-              ? 'bg-purple-500/10 border-purple-500 ring-2 ring-purple-500/20'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold">Suspended</span>
-            <Ban className="w-4 h-4 text-purple-600" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
-            {suspendedCount}
-          </div>
-          <span className="text-[11px] text-purple-700 font-medium">On Hold</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('all')}
-          className={`p-4 rounded-xl border text-left transition ${
-            activeTab === 'all' && filterStatus === 'all'
-              ? 'bg-slate-100 border-slate-400'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-500 mb-1">
-            <span className="text-xs font-semibold">Total Listings</span>
-            <BarChart3 className="w-4 h-4 text-slate-600" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
-            {totalCount}
-          </div>
-          <span className="text-[11px] text-slate-500 font-medium">Database Total</span>
-        </button>
-      </div>
-
-      {/* Navigation Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-2">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      {/* Moderation Navigation Tabs */}
+      <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <div className="flex gap-2 min-w-max pb-0.5">
           <button
             type="button"
             onClick={() => setActiveTab('pending')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
               activeTab === 'pending'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
             }`}
           >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Pending Listings ({pendingCount})</span>
+            <span>Pending Listings</span>
+            {pendingCount > 0 && (
+              <span className="text-[10px] bg-amber-500 text-white font-mono px-1.5 py-0.5 rounded-full font-bold">
+                {pendingCount}
+              </span>
+            )}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('approved')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
               activeTab === 'approved'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
             }`}
           >
-            <CheckCircle className="w-3.5 h-3.5" />
-            <span>Approved Listings ({approvedCount})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('rejected')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-              activeTab === 'rejected'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>Rejected Listings ({rejectedCount})</span>
+            <span>Approved Listings</span>
+            <span className="text-[10px] bg-slate-200 text-slate-700 font-mono px-1.5 py-0.5 rounded-full font-semibold">
+              {approvedCount}
+            </span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('all')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
               activeTab === 'all'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
             }`}
           >
-            <Filter className="w-3.5 h-3.5" />
-            <span>All Listings ({totalCount})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-              activeTab === 'history'
-                ? 'bg-purple-700 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Moderation Audit Log</span>
+            <span>All Listings</span>
+            <span className="text-[10px] bg-slate-200 text-slate-700 font-mono px-1.5 py-0.5 rounded-full font-semibold">
+              {totalCount}
+            </span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('disputes')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
               activeTab === 'disputes'
-                ? 'bg-indigo-700 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
             }`}
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Disputes ({disputes.filter(d => d.status !== 'resolved').length})</span>
+            <ShieldAlert className="w-4 h-4 text-indigo-600" />
+            <span>Escrow Disputes</span>
+            {disputes.length > 0 && (
+              <span className="text-[10px] bg-indigo-100 text-indigo-800 font-mono px-1.5 py-0.5 rounded-full font-bold">
+                {disputes.length}
+              </span>
+            )}
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('chats')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-              activeTab === 'chats'
-                ? 'bg-emerald-800 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            onClick={() => setActiveTab('history')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
+              activeTab === 'history'
+                ? 'border-emerald-600 text-emerald-800 bg-emerald-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{language === 'np' ? 'सबै च्याट अनुगमन' : 'Platform Chats'} ({allConversations.length})</span>
+            <History className="w-4 h-4" />
+            <span>Audit History</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat-reports')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
+              activeTab === 'chat-reports'
+                ? 'border-rose-600 text-rose-800 bg-rose-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-rose-600" />
+            <span>Chat Moderation & Reports</span>
+            {chatReports.filter(r => r.status === 'pending').length > 0 && (
+              <span className="text-[10px] bg-rose-600 text-white font-mono px-1.5 py-0.5 rounded-full font-bold animate-pulse">
+                {chatReports.filter(r => r.status === 'pending').length}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
       {/* Main Moderation Listing Section (For pending, approved, rejected, all tabs) */}
-      {activeTab !== 'disputes' && activeTab !== 'history' && (
+      {activeTab !== 'disputes' && activeTab !== 'history' && activeTab !== 'chat-reports' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
           {/* Search & Filter Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -955,291 +750,260 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* 7. Platform-wide Live Chat Inspection & Moderation Tab */}
-      {activeTab === 'chats' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header */}
-          <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl border border-slate-800">
+      {/* =========================================================================
+          CHAT MODERATION & REPORTS SECTION (Requirement 18)
+      ========================================================================= */}
+      {activeTab === 'chat-reports' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
+          {/* Header & Overview Stats */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-                <span className="font-bold text-xs text-emerald-300 uppercase tracking-wider">
-                  Admin Real-time Chat Surveillance · च्याट अनुगमन
-                </span>
-                <span className="text-slate-600">·</span>
-                <span className="text-xs text-slate-300">
-                  Total Conversations: {allConversations.length}
-                </span>
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-rose-600" />
+                <h2 className="font-bold text-base text-slate-900">
+                  {language === 'np' ? 'च्याट रिपोर्ट तथा प्रयोगकर्ता समीक्षा' : 'Chat Moderation & Safety Reports'}
+                </h2>
               </div>
-              <h2 className="font-display font-extrabold text-2xl text-white">
-                Platform-Wide Chat & Inquiry Surveillance
-              </h2>
-              <p className="mt-1 text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                Inspect every live conversation between prospective student renters and room listers across Nepal. Monitor inquiries, detect fraud or harassment, and ensure safe communication.
+              <p className="text-xs text-slate-500 mt-1">
+                Review flagged messages, investigate scam/harassment claims, suspend violators, and take moderation action.
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 text-center min-w-[130px]">
-                <span className="text-2xl font-bold font-mono text-emerald-400 block">
-                  {allConversations.length}
-                </span>
-                <span className="text-[10px] text-slate-400 font-semibold uppercase">
-                  Active Threads
-                </span>
-              </div>
+            <button
+              type="button"
+              onClick={loadChatReports}
+              disabled={reportsLoading}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${reportsLoading ? 'animate-spin' : ''}`} />
+              <span>Refresh Reports</span>
+            </button>
+          </div>
+
+          {/* Quick Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-[11px] text-slate-500 block font-medium">Total Reports</span>
+              <span className="text-lg font-bold text-slate-900 font-mono">{chatReports.length}</span>
+            </div>
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/80">
+              <span className="text-[11px] text-amber-700 block font-medium">Pending Review</span>
+              <span className="text-lg font-bold text-amber-900 font-mono">
+                {chatReports.filter(r => r.status === 'pending').length}
+              </span>
+            </div>
+            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200/80">
+              <span className="text-[11px] text-emerald-700 block font-medium">Resolved</span>
+              <span className="text-lg font-bold text-emerald-900 font-mono">
+                {chatReports.filter(r => r.status === 'resolved').length}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-[11px] text-slate-500 block font-medium">Dismissed</span>
+              <span className="text-lg font-bold text-slate-600 font-mono">
+                {chatReports.filter(r => r.status === 'dismissed').length}
+              </span>
             </div>
           </div>
 
-          {/* Search bar */}
-          <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-            <Search className="w-4 h-4 text-slate-400 ml-2" />
-            <input
-              type="text"
-              placeholder="Search chat by room title, renter, or landlord name..."
-              value={chatSearch}
-              onChange={(e) => setChatSearch(e.target.value)}
-              className="w-full text-xs bg-transparent focus:outline-none text-slate-900"
-            />
-            {chatSearch && (
-              <button
-                type="button"
-                onClick={() => setChatSearch('')}
-                className="text-xs text-slate-400 hover:text-slate-600 mr-2 cursor-pointer"
-              >
-                Clear
-              </button>
-            )}
+          {/* Filter Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                type="text"
+                value={reportSearchQuery}
+                onChange={e => setReportSearchQuery(e.target.value)}
+                placeholder="Search by user, room, or report reason..."
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+              />
+            </div>
+
+            <select
+              value={reportFilterStatus}
+              onChange={e => setReportFilterStatus(e.target.value as any)}
+              className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700"
+            >
+              <option value="all">All Moderation Statuses</option>
+              <option value="pending">Pending Attention</option>
+              <option value="resolved">Resolved</option>
+              <option value="dismissed">Dismissed</option>
+            </select>
+
+            <select
+              value={reportFilterReason}
+              onChange={e => setReportFilterReason(e.target.value)}
+              className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700"
+            >
+              <option value="all">All Report Reasons</option>
+              <option value="Spam">Spam</option>
+              <option value="Fraud">Fraud / Scam</option>
+              <option value="Harassment">Harassment</option>
+              <option value="Fake listing">Fake Listing</option>
+              <option value="Inappropriate content">Inappropriate Content</option>
+              <option value="Other">Other</option>
+            </select>
           </div>
 
-          {allConversations.length === 0 ? (
-            <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
-              <MessageSquare className="w-12 h-12 text-slate-300 mx-auto" />
-              <h3 className="font-bold text-sm text-slate-800">
-                {language === 'np' ? 'अहिलेसम्म कुनै प्रत्यक्ष च्याट दर्ता भएको छैन' : 'No Chat Conversations Yet'}
-              </h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                {language === 'np'
-                  ? 'विद्यार्थीहरूले कोठाबारे सोधपुछ गर्दा र घरधनीले जवाफ दिँदा यहाँ सम्पूर्ण संवादहरू वास्तविक समयमा देखिनेछन्।'
-                  : 'When student renters inquire about room listings, all conversations will appear here in real time for administrator inspection.'}
-              </p>
+          {/* Reports List */}
+          {reportsLoading ? (
+            <div className="text-center py-12 text-xs text-slate-400">
+              Loading chat reports...
+            </div>
+          ) : filteredChatReports.length === 0 ? (
+            <div className="text-center py-12 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+              No chat reports found matching the selected filters.
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[550px]">
-              {/* Left Column: Conversations List */}
-              <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col h-[650px]">
-                <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-800">
-                    Conversations ({filteredConversations.length})
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Click to inspect transcript
-                  </span>
-                </div>
+            <div className="space-y-4">
+              {filteredChatReports.map(rep => {
+                const isPending = rep.status === 'pending';
+                const reasonColors: Record<string, string> = {
+                  Spam: 'bg-orange-100 text-orange-800 border-orange-200',
+                  Fraud: 'bg-rose-100 text-rose-800 border-rose-200',
+                  Harassment: 'bg-red-100 text-red-800 border-red-200',
+                  'Fake listing': 'bg-amber-100 text-amber-800 border-amber-200',
+                  'Inappropriate content': 'bg-purple-100 text-purple-800 border-purple-200',
+                  Other: 'bg-slate-100 text-slate-800 border-slate-200',
+                };
+                const badgeClass = reasonColors[rep.reason] || reasonColors.Other;
 
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-                  {filteredConversations.map((conv) => {
-                    const isSelected = selectedChatConv?.id === conv.id;
-                    const roomObj = rooms.find(r => r.id === conv.roomId);
-
-                    return (
-                      <div
-                        key={conv.id}
-                        onClick={() => setSelectedChatConv(conv)}
-                        className={`p-3.5 transition cursor-pointer flex items-start gap-3 ${
-                          isSelected ? 'bg-emerald-50/80 border-l-4 border-emerald-600' : 'hover:bg-slate-50'
-                        }`}
-                      >
-                        <img
-                          src={conv.roomImage || roomObj?.images[0] || 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=400&q=80'}
-                          alt={conv.roomTitle}
-                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <h4 className="font-bold text-xs text-slate-900 truncate">
-                              {language === 'np' && conv.roomTitleNp ? conv.roomTitleNp : conv.roomTitle}
-                            </h4>
-                            <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                              {conv.lastMessage?.timestamp || ''}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 mt-1 text-[11px]">
-                            <span className="font-semibold text-slate-700 truncate">
-                              👤 {conv.renterName}
-                            </span>
-                            <span className="text-slate-400">↔</span>
-                            <span className="font-semibold text-emerald-800 truncate">
-                              🏠 {conv.ownerName}
-                            </span>
-                          </div>
-
-                          {conv.lastMessage && (
-                            <p className="text-[11px] text-slate-500 truncate mt-1 italic">
-                              "{conv.lastMessage.text}"
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Right Column: Transcript View */}
-              <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col h-[650px]">
-                {selectedChatConv ? (
-                  <>
-                    {/* Header */}
-                    <div className="p-4 bg-slate-900 text-white border-b border-slate-800 shrink-0 flex items-center justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs sm:text-sm text-white truncate">
-                            {selectedChatConv.roomTitle}
+                return (
+                  <div
+                    key={rep.id}
+                    className={`p-4 rounded-xl border text-xs space-y-3 transition ${
+                      rep.status === 'resolved'
+                        ? 'bg-emerald-50/30 border-emerald-200'
+                        : rep.status === 'dismissed'
+                        ? 'bg-slate-50 border-slate-200 opacity-75'
+                        : 'bg-rose-50/30 border-rose-200'
+                    }`}
+                  >
+                    {/* Top Row: IDs, Reason & Status */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] font-bold text-slate-700">{rep.id}</span>
+                        <span className="text-slate-300">·</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}>
+                          {rep.reason}
+                        </span>
+                        {rep.room_title && (
+                          <span className="text-slate-500 font-medium">
+                            Regarding: <strong className="text-slate-800">{rep.room_title}</strong>
                           </span>
-                          <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800 font-mono">
-                            Room ID: {selectedChatConv.roomId.substring(0, 8)}...
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-1">
-                          <span>Renter: <strong>{selectedChatConv.renterName}</strong></span>
-                          <span>·</span>
-                          <span>Owner: <strong>{selectedChatConv.ownerName}</strong></span>
-                          {selectedChatConv.ownerPhone && (
-                            <>
-                              <span>·</span>
-                              <span className="text-emerald-400">📞 {selectedChatConv.ownerPhone}</span>
-                            </>
-                          )}
-                        </div>
+                        )}
                       </div>
 
-                      {/* View Listing Button */}
-                      {rooms.find(r => r.id === selectedChatConv.roomId) && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {new Date(rep.created_at).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            rep.status === 'resolved'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : rep.status === 'dismissed'
+                              ? 'bg-slate-200 text-slate-700'
+                              : 'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}
+                        >
+                          {rep.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Parties involved */}
+                    <div className="p-2.5 bg-white/90 rounded-lg border border-slate-200/80 flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
+                      <div>
+                        <strong className="text-slate-800">Reporter:</strong> {rep.reporter_name || 'Concerned User'}
+                      </div>
+                      <span className="text-slate-300">→</span>
+                      <div>
+                        <strong className="text-slate-800">Reported User:</strong>{' '}
+                        <span className="text-rose-700 font-bold">{rep.reported_user_name || 'Flagged User'}</span>
+                      </div>
+                      {rep.message_id && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            Flagged Message ID: {rep.message_id}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Description */}
+                    <div className="text-slate-800 bg-white/90 p-3 rounded-lg border border-slate-200/80 leading-relaxed font-sans">
+                      <p className="italic text-slate-700">"{rep.description}"</p>
+                    </div>
+
+                    {/* Actions Toolbar */}
+                    <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60">
+                      <div className="flex items-center gap-2">
+                        {/* Suspend user button */}
                         <button
                           type="button"
-                          onClick={() => {
-                            const r = rooms.find(rm => rm.id === selectedChatConv.roomId);
-                            if (r) onSelectRoom(r);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold border border-slate-700 transition shrink-0 cursor-pointer"
+                          onClick={() =>
+                            handleSuspendUser(
+                              rep.reported_user_id,
+                              rep.reported_user_name || 'Reported User',
+                              rep.conversation_id
+                            )
+                          }
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                          title="Block this abusive user from messaging"
                         >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>View Room</span>
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>Suspend / Block Abuser</span>
                         </button>
-                      )}
-                    </div>
 
-                    {/* Messages Scroll Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#F8FAFC]">
-                      {chatMessages.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 text-xs">
-                          No messages recorded in this conversation yet.
-                        </div>
-                      ) : (
-                        chatMessages.map((msg) => {
-                          const isFromOwner = msg.senderRole === 'owner';
-                          const isFromAdmin = msg.senderRole === 'admin';
+                        {/* Delete message button if message_id exists */}
+                        {rep.message_id && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteReportedMessage(rep.message_id!)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                            title="Soft delete the inappropriate message"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Delete Flagged Message</span>
+                          </button>
+                        )}
+                      </div>
 
-                          return (
-                            <div
-                              key={msg.id}
-                              className={`flex flex-col ${isFromOwner ? 'items-end' : isFromAdmin ? 'items-center' : 'items-start'}`}
+                      {/* Status resolution actions */}
+                      <div className="flex items-center gap-2">
+                        {isPending && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleDismissReport(rep.id)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
                             >
-                              <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px]">
-                                <span className="font-bold text-slate-700">
-                                  {msg.senderName}
-                                </span>
-                                {isFromOwner ? (
-                                  <span className="bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded border border-emerald-300">
-                                    Landlord / Lister
-                                  </span>
-                                ) : isFromAdmin ? (
-                                  <span className="bg-purple-100 text-purple-800 font-bold px-1.5 py-0.2 rounded border border-purple-300">
-                                    Admin Moderator
-                                  </span>
-                                ) : (
-                                  <span className="bg-blue-100 text-blue-800 font-medium px-1.5 py-0.2 rounded border border-blue-200">
-                                    Student / Renter
-                                  </span>
-                                )}
-                                <span className="text-slate-400 font-mono">{msg.timestamp}</span>
-                              </div>
+                              <XCircle className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Dismiss</span>
+                            </button>
 
-                              <div
-                                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed ${
-                                  isFromOwner
-                                    ? 'bg-emerald-700 text-white rounded-br-xs shadow-xs'
-                                    : isFromAdmin
-                                    ? 'bg-purple-700 text-white text-center shadow-xs'
-                                    : 'bg-white text-slate-800 border border-slate-200 rounded-bl-xs shadow-xs'
-                                }`}
-                              >
-                                {msg.text}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
+                            <button
+                              type="button"
+                              onClick={() => handleResolveReport(rep.id)}
+                              className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>Mark as Resolved</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-
-                    {/* Admin Moderation Notice Sender */}
-                    <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0">
-                      <input
-                        type="text"
-                        placeholder="Send official moderation notice to this conversation..."
-                        value={adminNoteText}
-                        onChange={(e) => setAdminNoteText(e.target.value)}
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!adminNoteText.trim()) return;
-                          const newMsg: ChatMessage = {
-                            id: `admin-${Date.now()}`,
-                            senderId: currentUser?.id || 'admin',
-                            senderName: 'Platform Moderator (Admin)',
-                            senderRole: 'admin',
-                            text: adminNoteText.trim(),
-                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                            isSelf: true,
-                            roomId: selectedChatConv.roomId,
-                            renterId: selectedChatConv.renterId,
-                            conversationId: selectedChatConv.id,
-                          };
-                          saveRoomChatMessage(selectedChatConv.roomId, newMsg, {
-                            roomTitle: selectedChatConv.roomTitle,
-                            ownerId: selectedChatConv.ownerId,
-                            ownerName: selectedChatConv.ownerName,
-                            renterId: selectedChatConv.renterId,
-                            renterName: selectedChatConv.renterName,
-                          });
-                          setChatMessages(prev => [...prev, newMsg]);
-                          setAdminNoteText('');
-                          showNotification('Administrative notice posted to conversation.');
-                        }}
-                        disabled={!adminNoteText.trim()}
-                        className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Post Notice</span>
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-2">
-                    <MessageSquare className="w-12 h-12 text-slate-300" />
-                    <p className="font-semibold text-xs text-slate-600">
-                      Select a conversation on the left to view the complete transcript.
-                    </p>
-                    <p className="text-[11px] text-slate-400 max-w-xs">
-                      All messages, timestamps, and participants are recorded for safety and audit purposes.
-                    </p>
                   </div>
-                )}
-              </div>
+                );
+              })}
             </div>
           )}
         </div>

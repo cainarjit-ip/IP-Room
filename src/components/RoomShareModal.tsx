@@ -309,13 +309,13 @@ export const RoomShareModal: React.FC<RoomShareModalProps> = ({
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <span className="text-[11px] text-slate-500 block">मासिक भाडा (Monthly Rent)</span>
                     <span className="text-lg font-bold font-mono text-emerald-700">
-                      रु. {room.price.toLocaleString('en-IN')}/mo
+                      रु. {(room.price ?? 0).toLocaleString('en-IN')}/mo
                     </span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <span className="text-[11px] text-slate-500 block">कोठाको प्रकार (Room Type)</span>
                     <span className="text-sm font-bold text-slate-900 capitalize">
-                      {room.roomType.replace('_', ' ')} ({room.floor})
+                      {(room.roomType || 'room').replace(/_/g, ' ')} ({room.floor || 'Ground'})
                     </span>
                   </div>
                 </div>
@@ -328,19 +328,19 @@ export const RoomShareModal: React.FC<RoomShareModalProps> = ({
                   <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-700">
                     <div className="flex items-center gap-1.5">
                       <Droplets className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span className="truncate">{room.waterSchedule}</span>
+                      <span className="truncate">{room.waterSchedule || '24/7 Water Supply'}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span>{room.amenities.electricityBackup ? 'Inverter Solar Backup' : 'Standard Grid'}</span>
+                      <span>{room.amenities?.electricityBackup ? 'Inverter Solar Backup' : 'Standard Grid'}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Wifi className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                      <span>{room.amenities.wifi ? 'High-Speed WiFi' : 'No WiFi'}</span>
+                      <span>{room.amenities?.wifi ? 'High-Speed WiFi' : 'No WiFi'}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Building className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>{room.floor} Floor · {room.occupancyPreference.replace('_', ' ')}</span>
+                      <span>{room.floor || 'Ground'} Floor · {(room.occupancyPreference || 'any').replace(/_/g, ' ')}</span>
                     </div>
                   </div>
                 </div>
@@ -357,7 +357,7 @@ export const RoomShareModal: React.FC<RoomShareModalProps> = ({
                     <div className="pt-2 flex items-center gap-2">
                       <Phone className="w-3.5 h-3.5 text-emerald-600" />
                       <span className="font-mono font-bold text-xs text-slate-800">
-                        {room.owner.phone}
+                        {room.owner?.phone || 'Contact Landlord'}
                       </span>
                     </div>
                   </div>

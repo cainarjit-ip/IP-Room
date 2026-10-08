@@ -33,7 +33,7 @@ interface RoomDetailModalProps {
   language: Language;
   onClose: () => void;
   onStartBooking: (room: RoomListing) => void;
-  onOpenChat: (room: RoomListing) => void;
+  onStartChat?: (room: RoomListing) => void;
 }
 
 export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
@@ -41,7 +41,7 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
   language,
   onClose,
   onStartBooking,
-  onOpenChat,
+  onStartChat,
 }) => {
   if (!room) return null;
 
@@ -193,12 +193,12 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
             <div className="shrink-0 sm:text-right bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-xl">
               <div className="flex sm:justify-end items-baseline gap-1">
                 <span className="font-display font-extrabold text-2xl text-slate-900 font-mono tabular-nums">
-                  रु. {room.price.toLocaleString('en-IN')}
+                  रु. {(room.price ?? 0).toLocaleString('en-IN')}
                 </span>
                 <span className="text-xs text-slate-500">{t.perMonth}</span>
               </div>
               <div className="text-xs text-slate-500">
-                {t.securityDeposit}: रु. {room.deposit.toLocaleString('en-IN')} (Refundable)
+                {t.securityDeposit}: रु. {(room.deposit ?? 0).toLocaleString('en-IN')} (Refundable)
               </div>
             </div>
           </div>
@@ -207,22 +207,22 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl text-xs">
             <div>
               <span className="text-slate-500 block mb-0.5">{t.specFloor}</span>
-              <span className="font-semibold text-slate-900">{room.floor}</span>
+              <span className="font-semibold text-slate-900">{room.floor || 'Ground'}</span>
             </div>
             <div>
               <span className="text-slate-500 block mb-0.5">{t.specOccupancy}</span>
               <span className="font-semibold text-slate-900 capitalize">
-                {room.occupancyPreference.replace('_', ' ')}
+                {(room.occupancyPreference || 'any').replace(/_/g, ' ')}
               </span>
             </div>
             <div>
               <span className="text-slate-500 block mb-0.5">{t.specAvailableFrom}</span>
-              <span className="font-semibold text-slate-900">{room.availableFrom}</span>
+              <span className="font-semibold text-slate-900">{room.availableFrom || 'Immediately'}</span>
             </div>
             <div>
               <span className="text-slate-500 block mb-0.5">{t.specSubmeter}</span>
               <span className="font-semibold text-slate-900 font-mono tabular-nums">
-                रु. {room.electricityRatePerUnit} {t.nprPerUnit}
+                रु. {room.electricityRatePerUnit ?? 12} {t.nprPerUnit}
               </span>
             </div>
           </div>
@@ -263,31 +263,31 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
                 <Droplets className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>24/7 Water Supply</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.hotWaterSolar ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.hotWaterSolar ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Sun className="w-4 h-4 text-amber-500 shrink-0" />
                 <span>Solar Hot Water</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.wifi ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.wifi ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Wifi className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>High-Speed WiFi</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.attachedBathroom ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.attachedBathroom ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Home className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Attached Bathroom</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.kitchenFacility ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.kitchenFacility ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Home className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Kitchen Space</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.bikeParking ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.bikeParking ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Car className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Bike / Scooter Parking</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.electricityBackup ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.electricityBackup ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <Zap className="w-4 h-4 text-amber-500 shrink-0" />
                 <span>Inverter / Solar Backup</span>
               </div>
-              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities.cctvSecurity ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
+              <div className={`flex items-center gap-2 p-2 rounded-lg ${room.amenities?.cctvSecurity ? 'bg-emerald-50 text-emerald-900 font-medium' : 'text-slate-400 line-through'}`}>
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>CCTV Security Gate</span>
               </div>
@@ -298,7 +298,7 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
           <div>
             <h2 className="font-semibold text-sm text-slate-900 mb-2">{t.houseRulesTitle}</h2>
             <ul className="space-y-1.5 text-xs text-slate-600 list-disc list-inside">
-              {(language === 'np' ? room.houseRulesNp : room.houseRules).map((rule, idx) => (
+              {((language === 'np' ? room.houseRulesNp : room.houseRules) || room.houseRules || []).map((rule, idx) => (
                 <li key={idx}>{rule}</li>
               ))}
             </ul>
@@ -309,14 +309,14 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <img
-                  src={room.owner.avatar}
-                  alt={room.owner.name}
+                  src={room.owner?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80'}
+                  alt={room.owner?.name || 'Landlord'}
                   className="w-12 h-12 rounded-full object-cover border border-slate-200"
                 />
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-sm text-slate-900">{room.owner.name}</span>
-                    {room.owner.citizenshipVerified && (
+                    <span className="font-semibold text-sm text-slate-900">{room.owner?.name || 'Landlord'}</span>
+                    {room.owner?.citizenshipVerified && (
                       <span className="inline-flex items-center gap-0.5 text-blue-600 text-xs font-semibold">
                         <ShieldCheck className="w-3.5 h-3.5" />
                         <span>Verified</span>
@@ -324,42 +324,48 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
                     )}
                   </div>
                   <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                    <span>Response: {room.owner.responseRate}</span>
+                    <span>Response: {room.owner?.responseRate || '95%'}</span>
                     <span>·</span>
-                    <span>{room.owner.responseTime}</span>
+                    <span>{room.owner?.responseTime || 'within 1 hr'}</span>
                   </div>
                 </div>
               </div>
 
               {/* Direct channels */}
               <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={`https://wa.me/${room.owner.whatsapp}?text=${encodeURIComponent(`Hello, I saw your room "${room.title}" on IP Room and would like to inquire.`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>WhatsApp</span>
-                </a>
+                {onStartChat && (
+                  <button
+                    type="button"
+                    onClick={() => onStartChat(room)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition shadow-xs ring-1 ring-emerald-600/30 active:scale-95 cursor-pointer"
+                    title="Directly chat with room owner"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-white" />
+                    <span>{language === 'np' ? '💬 घरधनीसँग च्याट' : '💬 Chat with Owner'}</span>
+                  </button>
+                )}
 
-                <button
-                  type="button"
-                  onClick={() => onOpenChat(room)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition shadow-xs ring-1 ring-emerald-600/30 active:scale-95"
-                  title="Directly chat with room lister / owner"
-                >
-                  <MessageSquare className="w-3.5 h-3.5 text-white" />
-                  <span>{language === 'np' ? 'घरधनीसँग सिधै च्याट' : 'Direct Chat with Lister'}</span>
-                </button>
+                {room.owner?.whatsapp && (
+                  <a
+                    href={`https://wa.me/${room.owner.whatsapp}?text=${encodeURIComponent(`Hello, I saw your room "${room.title}" on IP Room and would like to inquire.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>WhatsApp</span>
+                  </a>
+                )}
 
-                <a
-                  href={`tel:${room.owner.phone}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition"
-                >
-                  <Phone className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Call</span>
-                </a>
+                {room.owner?.phone && (
+                  <a
+                    href={`tel:${room.owner.phone}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition"
+                  >
+                    <Phone className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Call</span>
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -369,12 +375,12 @@ export const RoomDetailModal: React.FC<RoomDetailModalProps> = ({
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-sm text-slate-900 flex items-center gap-1.5">
                 <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                <span>{room.ratings.average} ({room.ratings.count} Student Reviews)</span>
+                <span>{room.ratings?.average ?? 5.0} ({room.ratings?.count ?? 0} Student Reviews)</span>
               </h2>
             </div>
 
             <div className="space-y-3">
-              {room.reviews.map(rev => (
+              {(room.reviews || []).map(rev => (
                 <div key={rev.id} className="p-3 bg-slate-50/70 rounded-lg border border-slate-100 text-xs">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-semibold text-slate-900">{rev.authorName}</span>

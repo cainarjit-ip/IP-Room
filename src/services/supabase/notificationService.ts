@@ -1,6 +1,14 @@
 import { supabase, isValidUUID, getAuthenticatedSessionUser } from '../../lib/supabase';
 import { UserRole, BookingRequest, UserProfile } from '../../types';
-import { getGlobalRealtimeChannel } from './chatService';
+
+let _globalRealtimeChannel: any = null;
+export const getGlobalRealtimeChannel = (): any => {
+  if (!_globalRealtimeChannel) {
+    _globalRealtimeChannel = supabase.channel('global_iproom_notifications');
+    _globalRealtimeChannel.subscribe();
+  }
+  return _globalRealtimeChannel;
+};
 
 export const CURRENT_CLIENT_SESSION_ID: string =
   typeof window !== 'undefined'
@@ -60,7 +68,7 @@ const notifyInAppListeners = (notification: AppNotification) => {
 if (typeof window !== 'undefined') {
   try {
     const globalChannel = getGlobalRealtimeChannel();
-    globalChannel.on('broadcast', { event: 'new_notification' }, ({ payload }) => {
+    globalChannel.on('broadcast', { event: 'new_notification' }, ({ payload }: { payload: any }) => {
       if (!payload || !payload.id) return;
       // CRITICAL: NEVER notify the sender from the same browser session or device!
       if (payload.senderSessionId && payload.senderSessionId === CURRENT_CLIENT_SESSION_ID) {
@@ -378,21 +386,82 @@ export const getUserNotifications = async (userId: string): Promise<AppNotificat
  * Mark notification as read
  */
 export const markNotificationAsRead = async (notificationId: string): Promise<boolean> => {
-  if (!isValidUUID(notificationId)) return false;
+  // Always update local storage queues so client state persists
+  if (typeof window !== 'undefined') {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('iproom_notifs_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const updated = list.map((item: any) =>
+                item.id === notificationId ? { ...item, read: true, is_read: true } : item
+              );
+              localStorage.setItem(key, JSON.stringify(updated));
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!isValidUUID(notificationId)) return true;
 
   const authUser = await getAuthenticatedSessionUser();
-  if (!authUser) return false;
+  if (!authUser) return true;
 
   try {
     const { error } = await (supabase
       .from('notifications') as any)
-      .update({ is_read: true })
+      .update({ is_read: true, read: true })
       .eq('id', notificationId);
 
     return !error;
   } catch (err) {
     return false;
   }
+};
+
+/**
+ * Mark all notifications as read for current user
+ */
+export const markAllNotificationsAsRead = async (
+  userId?: string,
+  _role?: UserRole
+): Promise<boolean> => {
+  if (typeof window !== 'undefined') {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('iproom_notifs_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const updated = list.map((item: any) => ({
+                ...item,
+                read: true,
+                is_read: true,
+              }));
+              localStorage.setItem(key, JSON.stringify(updated));
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (userId && isValidUUID(userId)) {
+    try {
+      await (supabase.from('notifications') as any)
+        .update({ is_read: true, read: true })
+        .eq('user_id', userId);
+    } catch (e) {}
+  }
+
+  return true;
 };
 
 /**

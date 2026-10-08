@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { Server } from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,14 +28,14 @@ app.get('*', (_req, res) => {
   });
 });
 
-const servers: Server[] = [];
+const servers = [];
 
-function listenOnPort(p: number) {
+function listenOnPort(p) {
   try {
     const s = app.listen(p, '0.0.0.0', () => {
       console.log(`Server listening on 0.0.0.0:${p}`);
     });
-    s.on('error', (err: any) => {
+    s.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
         console.log(`Port ${p} is already in use (e.g. reverse proxy active), continuing.`);
       } else {
@@ -44,7 +43,7 @@ function listenOnPort(p: number) {
       }
     });
     servers.push(s);
-  } catch (err: any) {
+  } catch (err) {
     console.error(`Failed to listen on port ${p}:`, err.message);
   }
 }
@@ -66,4 +65,3 @@ const shutdown = () => {
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
-

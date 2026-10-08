@@ -21,6 +21,7 @@ import {
   Map,
   Users,
   BookOpen,
+  MessageSquare,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -28,8 +29,8 @@ interface NavbarProps {
   onLanguageChange: (lang: Language) => void;
   activeRole: UserRole;
   onRoleChange: (role: UserRole) => void;
-  activeTab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard';
-  setActiveTab: (tab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard') => void;
+  activeTab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard' | 'messages';
+  setActiveTab: (tab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard' | 'messages') => void;
   wishlistCount: number;
   onOpenWishlist: () => void;
   compareCount: number;
@@ -40,7 +41,10 @@ interface NavbarProps {
   onSignOut: () => void;
   notifications?: AppNotification[];
   onOpenBookingContract?: (bookingId: string) => void;
-  onOpenChatWithRoom?: (roomId: string, conversationId?: string, senderName?: string) => void;
+  unreadChatCount?: number;
+  onOpenChat?: () => void;
+  onMarkNotificationAsRead?: (notificationId: string) => void;
+  onMarkAllNotificationsAsRead?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -60,7 +64,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSignOut,
   notifications = [],
   onOpenBookingContract,
-  onOpenChatWithRoom,
+  unreadChatCount = 0,
+  onOpenChat,
+  onMarkNotificationAsRead,
+  onMarkAllNotificationsAsRead,
 }) => {
   const t = getTranslation(language);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -84,7 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, [isUserMenuOpen]);
 
   const navigateTo = (
-    tab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard'
+    tab: 'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard' | 'messages'
   ) => {
     setActiveTab(tab);
     setIsMobileMenuOpen(false);
@@ -301,6 +308,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {language === 'np' ? 'विद्यार्थी निर्देशिका' : 'Student Guide'}
               </button>
 
+              {/* Chat & Messages nav tab */}
+              <button
+                type="button"
+                onClick={() => navigateTo('messages')}
+                className={getDesktopTabClass('messages')}
+              >
+                <span className="flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>{language === 'np' ? 'च्याट' : 'Messages'}</span>
+                  {unreadChatCount > 0 && (
+                    <span className="bg-emerald-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                      {unreadChatCount}
+                    </span>
+                  )}
+                </span>
+              </button>
+
               {/* Owner Dashboard link only when activeRole === 'owner' */}
               {activeRole === 'owner' && (
                 <button
@@ -324,10 +348,34 @@ export const Navbar: React.FC<NavbarProps> = ({
                   notifications={notifications}
                   onOpenBookingContract={onOpenBookingContract}
                   onOpenOwnerDashboard={() => navigateTo('owner-dashboard')}
-                  onOpenChatWithRoom={onOpenChatWithRoom}
                   onOpenAuthModal={() => onOpenAuthModal('login')}
+                  onOpenChat={() => {
+                    if (onOpenChat) onOpenChat();
+                    else navigateTo('messages');
+                  }}
+                  onMarkAsRead={onMarkNotificationAsRead}
+                  onMarkAllAsRead={onMarkAllNotificationsAsRead}
                 />
               </div>
+
+              {/* Chat / Messaging Button (Requirement 10: Global Chat Notification) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenChat) onOpenChat();
+                  else navigateTo('messages');
+                }}
+                className="relative shrink-0 p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title={language === 'np' ? 'च्याट तथा सन्देशहरू' : 'Chat & Messages'}
+                aria-label="Chat and Messages"
+              >
+                <MessageSquare className="w-5 h-5" />
+                {unreadChatCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-emerald-600 text-white text-[10px] font-bold min-w-[18px] h-4 px-1 rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  </span>
+                )}
+              </button>
 
               {/* Wishlist button */}
               <button
@@ -416,6 +464,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                         >
                           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                           <span>My Dashboard</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            if (onOpenChat) onOpenChat();
+                            else navigateTo('messages');
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-slate-700 hover:bg-slate-50 hover:text-emerald-700 font-medium transition flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>{language === 'np' ? 'च्याट र सन्देशहरू' : 'Messages & Chat'}</span>
+                          </div>
+                          {unreadChatCount > 0 && (
+                            <span className="bg-emerald-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                              {unreadChatCount}
+                            </span>
+                          )}
                         </button>
 
                         <button
@@ -526,6 +594,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <BookOpen className="w-5 h-5 shrink-0" />
                   <span>{language === 'np' ? 'विद्यार्थी निर्देशिका' : 'Student Guide'}</span>
+                </button>
+
+                {/* Chat & Messages - Mobile Drawer */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    if (onOpenChat) onOpenChat();
+                    else navigateTo('messages');
+                  }}
+                  className={getMobileTabClass('messages')}
+                >
+                  <MessageSquare className="w-5 h-5 shrink-0 text-emerald-600" />
+                  <span className="flex-1">{language === 'np' ? 'च्याट र सन्देशहरू' : 'Chat & Messages'}</span>
+                  {unreadChatCount > 0 && (
+                    <span className="bg-emerald-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      {unreadChatCount}
+                    </span>
+                  )}
                 </button>
 
                 {/* Owner Dashboard - only when owner role is active */}

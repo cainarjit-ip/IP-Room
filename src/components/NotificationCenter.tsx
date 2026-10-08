@@ -15,6 +15,7 @@ import {
   AppNotification,
   requestPushNotificationPermission,
   markNotificationAsRead,
+  markAllNotificationsAsRead,
   addNotificationListener,
   CURRENT_CLIENT_SESSION_ID,
 } from '../services/supabase/notificationService';
@@ -27,8 +28,10 @@ interface NotificationCenterProps {
   notifications: AppNotification[];
   onOpenBookingContract?: (bookingId: string) => void;
   onOpenOwnerDashboard?: () => void;
-  onOpenChatWithRoom?: (roomId: string, conversationId?: string, senderName?: string) => void;
   onOpenAuthModal?: () => void;
+  onOpenChat?: (roomId?: string, conversationId?: string) => void;
+  onMarkAsRead?: (notificationId: string) => void;
+  onMarkAllAsRead?: () => void;
 }
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({
@@ -38,8 +41,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   notifications,
   onOpenBookingContract,
   onOpenOwnerDashboard,
-  onOpenChatWithRoom,
   onOpenAuthModal,
+  onOpenChat,
+  onMarkAsRead,
+  onMarkAllAsRead,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
@@ -58,6 +63,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
   // Listen to in-app foreground notifications for floating toast banner (ONLY for recipient)
   useEffect(() => {
+    let timer: any = null;
     const unsubscribe = addNotificationListener((notif) => {
       // 1. Never show a toast to the sender for their own message
       if (currentUser?.id && notif.data?.senderId && notif.data.senderId === currentUser.id) {
@@ -88,31 +94,41 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
       // Play soft web audio beep chime
       try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
-        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.4);
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const audioCtx = new AudioContextClass();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+          osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+          gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.4);
+          setTimeout(() => {
+            try {
+              audioCtx.close();
+            } catch (e) {}
+          }, 500);
+        }
       } catch (e) {
         // AudioContext not allowed without gesture
       }
 
       // Auto dismiss toast after 6 seconds
-      const timer = setTimeout(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
         setActiveToast(prev => (prev?.id === notif.id ? null : prev));
       }, 6000);
-
-      return () => clearTimeout(timer);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
   }, [activeRole, currentUser?.id, currentUser?.name]);
 
   // Close dropdown on outside click
@@ -143,29 +159,40 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   };
 
   const handleNotificationClick = (notif: AppNotification) => {
-    markNotificationAsRead(notif.id);
+    // 1. Mark as read
+    if (onMarkAsRead) {
+      onMarkAsRead(notif.id);
+    } else {
+      markNotificationAsRead(notif.id);
+      notif.read = true;
+    }
     setIsOpen(false);
 
+    // 2. Route accurately according to notification type
     if (notif.type === 'booking_confirmed' && notif.data?.bookingId && onOpenBookingContract) {
       onOpenBookingContract(notif.data.bookingId);
-    } else if (notif.type === 'booking_inquiry' && onOpenOwnerDashboard) {
-      onOpenOwnerDashboard();
-    } else if (notif.type === 'chat_message' && onOpenChatWithRoom) {
-      const targetRoomId =
-        notif.data?.roomId ||
-        (notif as any).roomId ||
-        notif.data?.bookingId ||
-        (notif as any).reference_id ||
-        '';
-      const targetConvId =
-        notif.data?.conversationId ||
-        (notif as any).conversationId ||
-        undefined;
-      const senderName =
-        notif.data?.senderName ||
-        (notif as any).senderName ||
-        undefined;
-      onOpenChatWithRoom(targetRoomId, targetConvId, senderName);
+    } else if (notif.type === 'chat_message') {
+      if (onOpenChat) {
+        onOpenChat(notif.data?.roomId, notif.data?.conversationId);
+      } else if (activeRole === 'owner' && onOpenOwnerDashboard) {
+        onOpenOwnerDashboard();
+      }
+    } else if (notif.type === 'booking_inquiry') {
+      if (onOpenOwnerDashboard) {
+        onOpenOwnerDashboard();
+      }
+    }
+  };
+
+  const handleMarkAllRead = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onMarkAllAsRead) {
+      onMarkAllAsRead();
+    } else {
+      markAllNotificationsAsRead(currentUser?.id, activeRole);
+      notifications.forEach(n => {
+        n.read = true;
+      });
     }
   };
 
@@ -254,9 +281,19 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             </div>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-800">
-                  {unreadCount} unread
-                </span>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold hover:underline cursor-pointer transition px-1"
+                    title={language === 'np' ? 'सबै पढेको चिन्ह लगाउनुहोस्' : 'Mark all as read'}
+                  >
+                    {language === 'np' ? 'सबै पढ्नुभयो' : 'Mark all read'}
+                  </button>
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-800">
+                    {unreadCount} unread
+                  </span>
+                </>
               )}
             </div>
           </div>

@@ -53,7 +53,6 @@ import {
   onAuthStateChange,
   updateDisputeStatusInSupabase,
   fetchDisputesFromSupabase,
-  DbConversation,
 } from './services/supabase';
 import {
   AppNotification,
@@ -61,6 +60,8 @@ import {
   setupForegroundFCMListener,
   notifyOwnerOfNewBookingInquiry,
   notifyStudentOfBookingConfirmed,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
   CURRENT_CLIENT_SESSION_ID,
 } from './services/supabase/notificationService';
 
@@ -74,7 +75,6 @@ import { RoomDetailModal } from './components/RoomDetailModal';
 import { InteractiveMapModal } from './components/InteractiveMapModal';
 import { BookingPaymentModal } from './components/BookingPaymentModal';
 import { DigitalLeaseAgreementModal } from './components/DigitalLeaseAgreementModal';
-import { ChatDrawer } from './components/ChatDrawer';
 import { CompareDrawer } from './components/CompareDrawer';
 import { OwnerListingWizard } from './components/OwnerListingWizard';
 import { OwnerDashboard } from './components/OwnerDashboard';
@@ -84,6 +84,12 @@ import { RoommateFinder } from './components/RoommateFinder';
 import { AIRecommendationsSection } from './components/AIRecommendationsSection';
 import { WishlistModal } from './components/WishlistModal';
 import { Footer } from './components/Footer';
+import { ChatInbox } from './components/chat/ChatInbox';
+import {
+  getOrCreateConversation,
+  getTotalUnreadCount,
+  getGlobalChatRealtimeChannel,
+} from './services/supabase/chatService';
 
 // Icons
 import {
@@ -96,6 +102,8 @@ import {
   CheckCircle2,
   Users,
   Lock,
+  MessageSquare,
+  X,
 } from 'lucide-react';
 
 export default function App() {
@@ -103,8 +111,17 @@ export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [activeRole, setActiveRole] = useState<UserRole>('renter');
   const [activeTab, setActiveTab] = useState<
-    'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard'
+    'browse' | 'map' | 'roommates' | 'guide' | 'owner-dashboard' | 'admin-dashboard' | 'messages'
   >('browse');
+
+  // Real-time Chat state (Requirements 2, 6, 10 & 11)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [chatToast, setChatToast] = useState<{
+    conversationId: string;
+    preview: string;
+    senderId?: string;
+  } | null>(null);
 
   // Firebase User Authentication state (persisted across page reloads)
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -507,8 +524,6 @@ export default function App() {
   const [selectedRoomDetail, setSelectedRoomDetail] = useState<RoomListing | null>(null);
   const [bookingRoom, setBookingRoom] = useState<RoomListing | null>(null);
   const [viewingContractBooking, setViewingContractBooking] = useState<BookingRequest | null>(null);
-  const [activeChatRoom, setActiveChatRoom] = useState<RoomListing | null>(null);
-  const [activeChatConversation, setActiveChatConversation] = useState<DbConversation | null>(null);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [isAddListingOpen, setIsAddListingOpen] = useState(false);
@@ -556,6 +571,137 @@ export default function App() {
         toggleComparisonItem(currentUser.id, roomId, false);
       }
     }
+  };
+
+  // Real-time Chat: Refresh unread messages count and listen for cross-device alerts
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setUnreadChatCount(0);
+      return;
+    }
+
+    const refreshUnread = () => {
+      getTotalUnreadCount(currentUser.id).then(count => {
+        setUnreadChatCount(count);
+      });
+    };
+
+    refreshUnread();
+    const interval = setInterval(refreshUnread, 15000);
+
+    // Global broadcast channel listener for real-time notification toasts
+    const channel = getGlobalChatRealtimeChannel();
+    const handler = (event: any) => {
+      const payload = event?.payload;
+      if (
+        payload &&
+        payload.receiver_id === currentUser.id &&
+        payload.sender_id !== currentUser.id
+      ) {
+        refreshUnread();
+        // If user is not currently inside this active conversation, trigger toast notification
+        if (activeTab !== 'messages' || activeConversationId !== payload.conversation_id) {
+          setChatToast({
+            conversationId: payload.conversation_id,
+            preview: payload.preview || 'New message received',
+            senderId: payload.sender_id,
+          });
+        }
+      }
+    };
+
+    channel.on('broadcast', { event: 'new_chat_message' }, handler);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [currentUser?.id, activeTab, activeConversationId]);
+
+  // Handle "💬 Chat with Owner" click (Requirement 2: Chat Entry Point)
+  const handleStartChatWithRoom = async (room: RoomListing) => {
+    if (!currentUser) {
+      handleOpenAuthModal('login', 'renter');
+      return;
+    }
+
+    const ownerId = room.owner.id || 'demo_owner_id';
+    if (currentUser.id === ownerId) {
+      setChatToast({
+        conversationId: '',
+        preview:
+          language === 'np'
+            ? 'यो तपाईंको आफ्नै कोठा हो। तपाईं यसमा आफैंसँग च्याट गर्न सक्नुहुन्न।'
+            : 'This is your own listing. You cannot start a conversation with yourself.',
+        senderId: currentUser.id,
+      });
+      return;
+    }
+
+    const { conversation } = await getOrCreateConversation(
+      room.id,
+      currentUser.id,
+      ownerId
+    );
+
+    if (conversation) {
+      setSelectedRoomDetail(null);
+      setActiveConversationId(conversation.id);
+      setActiveTab('messages');
+    }
+  };
+
+  // Handle owner starting conversation with tenant
+  const handleStartChatWithTenant = async (roomId: string, tenantId: string, tenantName: string) => {
+    if (!currentUser) {
+      handleOpenAuthModal('login', 'owner');
+      return;
+    }
+
+    const { conversation } = await getOrCreateConversation(
+      roomId,
+      tenantId,
+      currentUser.id
+    );
+
+    if (conversation) {
+      setActiveConversationId(conversation.id);
+      setActiveTab('messages');
+    }
+  };
+
+  // Open Chat from Navbar or Dashboard
+  const handleOpenChat = () => {
+    if (!currentUser) {
+      handleOpenAuthModal('login');
+      return;
+    }
+    setActiveTab('messages');
+  };
+
+  // Mark notification as read
+  const handleMarkNotificationAsRead = (notificationId: string) => {
+    setNotifications(prev => {
+      const updated = prev.map(n => (n.id === notificationId ? { ...n, read: true } : n));
+      try {
+        const currentUserId = currentUser?.id || 'guest_user';
+        localStorage.setItem(`iproom_notifs_user_${currentUserId}`, JSON.stringify(updated.slice(0, 30)));
+      } catch (e) {}
+      return updated;
+    });
+    markNotificationAsRead(notificationId);
+  };
+
+  // Mark all notifications as read
+  const handleMarkAllNotificationsAsRead = () => {
+    setNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, read: true }));
+      try {
+        const currentUserId = currentUser?.id || 'guest_user';
+        localStorage.setItem(`iproom_notifs_user_${currentUserId}`, JSON.stringify(updated.slice(0, 30)));
+      } catch (e) {}
+      return updated;
+    });
+    markAllNotificationsAsRead(currentUser?.id, activeRole);
   };
 
   // Quick book action
@@ -986,9 +1132,6 @@ export default function App() {
     if (selectedRoomDetail?.id === roomId) {
       setSelectedRoomDetail(null);
     }
-    if (activeChatRoom?.id === roomId) {
-      setActiveChatRoom(null);
-    }
     if (bookingRoom?.id === roomId) {
       setBookingRoom(null);
     }
@@ -1026,114 +1169,15 @@ export default function App() {
         onOpenAuthModal={handleOpenAuthModal}
         onSignOut={handleSignOut}
         notifications={notifications}
+        unreadChatCount={unreadChatCount}
+        onOpenChat={handleOpenChat}
+        onMarkNotificationAsRead={handleMarkNotificationAsRead}
+        onMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
         onOpenBookingContract={bookingId => {
           const found = bookings.find(b => b.id === bookingId);
           if (found) {
             setViewingContractBooking(found);
           }
-        }}
-        onOpenChatWithRoom={(roomId: string, conversationId?: string, senderName?: string) => {
-          const openChat = async () => {
-            // 1. Check in-memory rooms
-            let found = rooms.find(
-              r => r.id === roomId || (roomId && r.id?.toLowerCase() === roomId.toLowerCase())
-            );
-
-            // 2. If not in memory, query Supabase rooms table
-            if (!found && roomId && isValidUUID(roomId)) {
-              try {
-                const { data: dbRoom } = await (supabase
-                  .from('rooms') as any)
-                  .select('*')
-                  .eq('id', roomId)
-                  .maybeSingle();
-
-                if (dbRoom) {
-                  const base = rooms[0] || INITIAL_ROOMS[0];
-                  const mapped: RoomListing = {
-                    ...base,
-                    id: dbRoom.id,
-                    title: dbRoom.title || base.title,
-                    titleNp: dbRoom.title_np || base.titleNp,
-                    price: Number(dbRoom.price) || base.price,
-                    location: dbRoom.location || base.location,
-                    images: Array.isArray(dbRoom.images) && dbRoom.images.length > 0
-                      ? dbRoom.images
-                      : base.images,
-                    owner: {
-                      ...base.owner,
-                      id: dbRoom.owner_id || base.owner.id,
-                      name: base.owner.name || 'Room Landlord',
-                    },
-                    description: dbRoom.description || base.description,
-                    createdAt: dbRoom.created_at || base.createdAt,
-                  };
-                  found = mapped;
-                  setRooms(prev => [mapped, ...prev.filter(r => r.id !== mapped.id)]);
-                }
-              } catch (err) {
-                console.warn('Error fetching room for chat:', err);
-              }
-            }
-
-            // 3. If conversationId is provided, look up the room through the conversation
-            if (!found && conversationId && isValidUUID(conversationId)) {
-              try {
-                const { data: dbConv } = await (supabase.from('conversations') as any)
-                  .select('*, room:rooms(*)')
-                  .eq('id', conversationId)
-                  .maybeSingle();
-
-                if (dbConv?.room) {
-                  const dbRoom = dbConv.room;
-                  const base = rooms[0] || INITIAL_ROOMS[0];
-                  const mapped: RoomListing = {
-                    ...base,
-                    id: dbRoom.id,
-                    title: dbRoom.title || base.title,
-                    titleNp: dbRoom.title_np || base.titleNp,
-                    price: Number(dbRoom.price) || base.price,
-                    location: dbRoom.location || base.location,
-                    images: Array.isArray(dbRoom.images) && dbRoom.images.length > 0
-                      ? dbRoom.images
-                      : base.images,
-                    owner: {
-                      ...base.owner,
-                      id: dbRoom.owner_id || dbConv.owner_id || base.owner.id,
-                      name: base.owner.name || 'Room Landlord',
-                    },
-                    description: dbRoom.description || base.description,
-                    createdAt: dbRoom.created_at || base.createdAt,
-                  };
-                  found = mapped;
-                  setRooms(prev => [mapped, ...prev.filter(r => r.id !== mapped.id)]);
-                }
-              } catch (err) {
-                console.warn('Error fetching conversation room:', err);
-              }
-            }
-
-            // 4. Fallback: if not found, use first room so chat box ALWAYS opens
-            if (!found && rooms.length > 0) {
-              found = rooms[0];
-            }
-
-            if (found) {
-              setActiveChatRoom(found);
-              if (conversationId) {
-                setActiveChatConversation({
-                  id: conversationId,
-                  room_id: found.id,
-                  renter_name: senderName,
-                  renter_profile: senderName ? { name: senderName } : undefined,
-                } as any);
-              } else {
-                setActiveChatConversation(null);
-              }
-            }
-          };
-
-          openChat();
         }}
       />
 
@@ -1258,6 +1302,7 @@ export default function App() {
                           onToggleCompare={handleToggleCompare}
                           onSelectRoom={handleSelectRoom}
                           onQuickBook={handleQuickBook}
+                          onStartChat={handleStartChatWithRoom}
                         />
                       ))}
                     </div>
@@ -1284,17 +1329,6 @@ export default function App() {
         {activeTab === 'roommates' && (
           <RoommateFinder
             language={language}
-            onOpenDirectChat={(name, role) => {
-              // Open direct chat drawer
-              const dummyRoom: RoomListing = {
-                ...rooms[0],
-                owner: {
-                  ...rooms[0].owner,
-                  name,
-                }
-              };
-              setActiveChatRoom(dummyRoom);
-            }}
           />
         )}
 
@@ -1315,15 +1349,10 @@ export default function App() {
             onRejectBooking={handleRejectBooking}
             onViewContract={b => setViewingContractBooking(b)}
             onSelectRoom={handleSelectRoom}
-            onOpenChatWithRoom={(r) => {
-              setActiveChatRoom(r);
-              setActiveChatConversation(null);
-            }}
-            onOpenChatWithConversation={(r, conv) => {
-              setActiveChatRoom(r);
-              setActiveChatConversation(conv);
-            }}
             onDeleteRoom={handleOwnerDeleteRoom}
+            unreadChatCount={unreadChatCount}
+            onOpenChat={handleOpenChat}
+            onStartChatWithTenant={handleStartChatWithTenant}
           />
         )}
 
@@ -1345,6 +1374,42 @@ export default function App() {
             onSelectRoom={handleSelectRoom}
           />
         )}
+
+        {/* Real-time Renter <-> Room Owner Chat Inbox (Requirements 2, 3, 6 & 9) */}
+        {activeTab === 'messages' && (
+          <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-4 sm:py-6 h-[calc(100vh-5rem)] min-h-[580px]">
+            {currentUser ? (
+              <ChatInbox
+                currentUser={currentUser}
+                language={language}
+                initialConversationId={activeConversationId || undefined}
+                onViewRoom={handleSelectRoom}
+                onBrowseRooms={() => setActiveTab('browse')}
+              />
+            ) : (
+              <div className="max-w-md mx-auto my-16 bg-white p-8 rounded-2xl border border-slate-200 shadow-xl text-center space-y-4">
+                <div className="w-14 h-14 bg-emerald-50 text-emerald-700 rounded-2xl flex items-center justify-center mx-auto">
+                  <MessageSquare className="w-7 h-7" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {language === 'np' ? 'च्याट गर्न लगइन गर्नुहोस्' : 'Sign in to access your messages'}
+                </h2>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {language === 'np'
+                    ? 'घरधनी वा भाडावालसँग सुरक्षित च्याट गर्न कृपया आफ्नो खातामा लगइन गर्नुहोस्।'
+                    : 'Please log in to your account to chat with room owners, negotiate rent, and ask about room facilities.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAuthModal('login')}
+                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                >
+                  {language === 'np' ? 'लगइन गर्नुहोस्' : 'Sign In / Register'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </main>
 
       {/* Footer */}
@@ -1360,12 +1425,10 @@ export default function App() {
           room={selectedRoomDetail}
           language={language}
           onClose={() => setSelectedRoomDetail(null)}
+          onStartChat={handleStartChatWithRoom}
           onStartBooking={room => {
             setSelectedRoomDetail(null);
             setBookingRoom(room);
-          }}
-          onOpenChat={room => {
-            setActiveChatRoom(room);
           }}
         />
       )}
@@ -1391,22 +1454,7 @@ export default function App() {
         />
       )}
 
-      {/* 4. Real-time In-App Chat Drawer */}
-      {activeChatRoom && (
-        <ChatDrawer
-          room={activeChatRoom}
-          activeConversation={activeChatConversation}
-          language={language}
-          currentUser={currentUser}
-          onClose={() => {
-            setActiveChatRoom(null);
-            setActiveChatConversation(null);
-          }}
-          onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        />
-      )}
-
-      {/* 5. Compare Drawer */}
+      {/* 4. Compare Drawer */}
       {isCompareOpen && (
         <CompareDrawer
           comparedRooms={comparedRooms}
@@ -1515,6 +1563,48 @@ export default function App() {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Real-time Chat Notification Toast (Requirement 11) */}
+      {chatToast && (
+        <div className="fixed bottom-5 right-5 z-[70] max-w-sm bg-slate-900 text-white rounded-2xl p-4 shadow-2xl border border-slate-700 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <MessageSquare className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-xs text-emerald-400">
+                {chatToast.conversationId
+                  ? (language === 'np' ? 'नयाँ सन्देश' : 'New Chat Message')
+                  : (language === 'np' ? 'जानकारी' : 'Notice')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setChatToast(null)}
+                className="text-slate-400 hover:text-white transition"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-200 truncate mt-0.5 leading-snug">
+              {chatToast.preview}
+            </p>
+            {chatToast.conversationId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveConversationId(chatToast.conversationId);
+                  setActiveTab('messages');
+                  setChatToast(null);
+                }}
+                className="mt-2 text-xs font-bold text-emerald-400 hover:text-emerald-300 underline underline-offset-2 flex items-center gap-1 cursor-pointer"
+              >
+                <span>{language === 'np' ? 'च्याट खोल्नुहोस्' : 'Open Conversation'}</span>
+                <span>→</span>
+              </button>
+            ) : null}
           </div>
         </div>
       )}
