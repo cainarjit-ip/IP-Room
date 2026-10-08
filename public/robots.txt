@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Google Search Console XML Sitemap
+Sitemap: https://www.iky.com.np/sitemap.xml

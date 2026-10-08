@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +13,42 @@ app.use(express.json());
 // Health check endpoints for Cloud Run probes and uptime monitors
 app.get(['/healthz', '/health', '/api/health'], (_req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+// Explicit XML Sitemap route for Google Search Console & SEO crawlers
+app.get('/sitemap.xml', (req, res) => {
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'www.iky.com.np';
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const domain = `${proto}://${host}`;
+
+  try {
+    const sitemapDist = path.join(__dirname, 'dist', 'sitemap.xml');
+    const sitemapPublic = path.join(__dirname, 'public', 'sitemap.xml');
+    const filePath = fs.existsSync(sitemapDist) ? sitemapDist : sitemapPublic;
+
+    if (fs.existsSync(filePath)) {
+      let content = fs.readFileSync(filePath, 'utf-8');
+      if (!host.includes('iky.com.np')) {
+        content = content.replace(/https:\/\/www\.iky\.com\.np/g, domain);
+      }
+      res.header('Content-Type', 'application/xml; charset=utf-8');
+      return res.status(200).send(content);
+    }
+  } catch (err) {
+    console.error('Error serving sitemap.xml:', err);
+  }
+
+  res.header('Content-Type', 'application/xml; charset=utf-8');
+  res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${domain}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url></urlset>`);
+});
+
+// Explicit robots.txt route
+app.get('/robots.txt', (req, res) => {
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'www.iky.com.np';
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const domain = `${proto}://${host}`;
+  res.header('Content-Type', 'text/plain; charset=utf-8');
+  res.status(200).send(`User-agent: *\nAllow: /\n\nSitemap: ${domain}/sitemap.xml\n`);
 });
 
 // Serve static assets built by Vite and public directory
