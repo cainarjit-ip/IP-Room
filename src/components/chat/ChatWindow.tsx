@@ -137,7 +137,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       if (!isMounted) return;
       setMessages(fetchedMsgs);
       setIsLoading(false);
-      markConversationAsRead(conversation.id, currentUser.id);
+      markConversationAsRead(conversation.id, currentUser.id).then(() => {
+        if (onConversationUpdated) {
+          onConversationUpdated();
+        }
+      });
     });
 
     return () => {

@@ -29,6 +29,7 @@ import {
 import {
   supabase,
   isValidUUID,
+  stringToUUID,
   logoutUser,
   getUserProfile,
   subscribeToUserProfile,
@@ -587,17 +588,21 @@ export default function App() {
     };
 
     refreshUnread();
-    const interval = setInterval(refreshUnread, 15000);
+    const interval = setInterval(refreshUnread, 10000);
 
-    // Global broadcast channel listener for real-time notification toasts
-    const channel = getGlobalChatRealtimeChannel();
-    const handler = (event: any) => {
-      const payload = event?.payload;
-      if (
-        payload &&
-        payload.receiver_id === currentUser.id &&
-        payload.sender_id !== currentUser.id
-      ) {
+    const checkAndHandlePayload = (payload: any) => {
+      if (!payload) return;
+      const isSender = payload.sender_id === currentUser.id || payload.raw_sender_id === currentUser.id;
+      if (isSender) return;
+
+      const isRecipient =
+        payload.receiver_id === currentUser.id ||
+        payload.raw_receiver_id === currentUser.id ||
+        payload.toUserId === currentUser.id ||
+        (currentUser.id && payload.receiver_id && isValidUUID(currentUser.id) && payload.receiver_id === currentUser.id) ||
+        (currentUser.id && payload.receiver_id && !isValidUUID(currentUser.id) && payload.receiver_id === stringToUUID(currentUser.id));
+
+      if (isRecipient) {
         refreshUnread();
         // If user is not currently inside this active conversation, trigger toast notification
         if (activeTab !== 'messages' || activeConversationId !== payload.conversation_id) {
@@ -610,12 +615,55 @@ export default function App() {
       }
     };
 
+    // 1. Supabase WebSocket broadcast channel
+    const channel = getGlobalChatRealtimeChannel();
+    const handler = (event: any) => {
+      checkAndHandlePayload(event?.payload);
+    };
     channel.on('broadcast', { event: 'new_chat_message' }, handler);
+
+    // 2. Window CustomEvent listeners (for same-tab / local actions)
+    const handleLocalNewMsg = (e: any) => {
+      checkAndHandlePayload(e?.detail);
+    };
+    const handleUnreadChanged = () => {
+      refreshUnread();
+    };
+
+    window.addEventListener('iproom_new_chat_message', handleLocalNewMsg);
+    window.addEventListener('iproom_unread_chat_changed', handleUnreadChanged);
+    window.addEventListener('iproom_chat_read', handleUnreadChanged);
+
+    // 3. Storage event listener (for cross-tab sync)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'iproom_chat_last_message') {
+        try {
+          const parsed = JSON.parse(e.newValue || '{}');
+          checkAndHandlePayload(parsed);
+        } catch (err) {}
+      } else if (e.key === 'iproom_chat_last_read_event' || e.key === 'iproom_chat_conversations') {
+        refreshUnread();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener('iproom_new_chat_message', handleLocalNewMsg);
+      window.removeEventListener('iproom_unread_chat_changed', handleUnreadChanged);
+      window.removeEventListener('iproom_chat_read', handleUnreadChanged);
+      window.removeEventListener('storage', handleStorage);
     };
   }, [currentUser?.id, activeTab, activeConversationId]);
+
+  // Refresh chat unread counter across global UI
+  const handleRefreshChatUnread = () => {
+    if (currentUser?.id) {
+      getTotalUnreadCount(currentUser.id).then(count => {
+        setUnreadChatCount(count);
+      });
+    }
+  };
 
   // Handle "💬 Chat with Owner" click (Requirement 2: Chat Entry Point)
   const handleStartChatWithRoom = async (room: RoomListing) => {
@@ -1385,6 +1433,7 @@ export default function App() {
                 initialConversationId={activeConversationId || undefined}
                 onViewRoom={handleSelectRoom}
                 onBrowseRooms={() => setActiveTab('browse')}
+                onUnreadChanged={handleRefreshChatUnread}
               />
             ) : (
               <div className="max-w-md mx-auto my-16 bg-white p-8 rounded-2xl border border-slate-200 shadow-xl text-center space-y-4">

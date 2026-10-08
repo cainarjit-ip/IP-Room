@@ -3,6 +3,7 @@ import { Language, UserProfile, RoomListing } from '../../types';
 import {
   DbConversation,
   getUserConversations,
+  markConversationAsRead,
 } from '../../services/supabase/chatService';
 import { ChatWindow } from './ChatWindow';
 import {
@@ -26,6 +27,7 @@ interface ChatInboxProps {
   initialConversationId?: string;
   onViewRoom?: (room: RoomListing) => void;
   onBrowseRooms?: () => void;
+  onUnreadChanged?: () => void;
 }
 
 export const ChatInbox: React.FC<ChatInboxProps> = ({
@@ -34,6 +36,7 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
   initialConversationId,
   onViewRoom,
   onBrowseRooms,
+  onUnreadChanged,
 }) => {
   const [conversations, setConversations] = useState<DbConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<DbConversation | null>(null);
@@ -52,6 +55,8 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
       const match = list.find((c) => c.id === initialConversationId);
       if (match) {
         setSelectedConversation(match);
+        markConversationAsRead(match.id, currentUser.id);
+        if (onUnreadChanged) onUnreadChanged();
       }
     } else if (!selectedConversation && list.length > 0 && window.innerWidth >= 1024) {
       // On desktop, auto-select the first conversation if none selected
@@ -62,6 +67,48 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
   useEffect(() => {
     loadConversations();
   }, [currentUser.id, initialConversationId]);
+
+  // Handle user selecting/reading a conversation
+  const handleSelectConversation = (conv: DbConversation) => {
+    setSelectedConversation(conv);
+    // 1. Optimistically clear unread badge from state immediately
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === conv.id
+          ? {
+              ...c,
+              unread_count: 0,
+              renter_unread_count: 0,
+              owner_unread_count: 0,
+            }
+          : c
+      )
+    );
+    // 2. Mark as read in storage and backend
+    markConversationAsRead(conv.id, currentUser.id);
+    if (onUnreadChanged) {
+      onUnreadChanged();
+    }
+  };
+
+  // Listen for real-time unread changes and new messages
+  useEffect(() => {
+    const handleSync = () => {
+      getUserConversations(currentUser.id).then(({ conversations: list }) => {
+        setConversations(list);
+      });
+    };
+
+    window.addEventListener('iproom_unread_chat_changed', handleSync);
+    window.addEventListener('iproom_chat_read', handleSync);
+    window.addEventListener('iproom_new_chat_message', handleSync);
+
+    return () => {
+      window.removeEventListener('iproom_unread_chat_changed', handleSync);
+      window.removeEventListener('iproom_chat_read', handleSync);
+      window.removeEventListener('iproom_new_chat_message', handleSync);
+    };
+  }, [currentUser.id]);
 
   // Filter conversations
   const filteredConversations = useMemo(() => {
@@ -229,7 +276,7 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
                 return (
                   <div
                     key={conv.id}
-                    onClick={() => setSelectedConversation(conv)}
+                    onClick={() => handleSelectConversation(conv)}
                     className={`p-3.5 flex items-start gap-3 cursor-pointer transition ${
                       isSelected
                         ? 'bg-emerald-50/80 border-l-4 border-emerald-600'
@@ -283,7 +330,7 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
                     </div>
 
                     {/* Unread badge */}
-                    {unreadCount > 0 && (
+                    {!isSelected && unreadCount > 0 && (
                       <span className="shrink-0 bg-emerald-600 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-xs">
                         {unreadCount}
                       </span>

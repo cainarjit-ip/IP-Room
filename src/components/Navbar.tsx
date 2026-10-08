@@ -365,13 +365,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                   if (onOpenChat) onOpenChat();
                   else navigateTo('messages');
                 }}
-                className="relative shrink-0 p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                title={language === 'np' ? 'च्याट तथा सन्देशहरू' : 'Chat & Messages'}
+                className={`relative shrink-0 p-2 ${
+                  unreadChatCount > 0
+                    ? 'text-emerald-700 bg-emerald-50/80 hover:bg-emerald-100'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                } rounded-lg transition-colors cursor-pointer`}
+                title={
+                  language === 'np'
+                    ? `च्याट तथा सन्देशहरू${unreadChatCount > 0 ? ` (${unreadChatCount} नयाँ)` : ''}`
+                    : `Chat & Messages${unreadChatCount > 0 ? ` (${unreadChatCount} new)` : ''}`
+                }
                 aria-label="Chat and Messages"
               >
-                <MessageSquare className="w-5 h-5" />
+                <MessageSquare
+                  className={`w-5 h-5 transition-transform ${
+                    unreadChatCount > 0 ? 'text-emerald-700 scale-105' : ''
+                  }`}
+                />
                 {unreadChatCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-emerald-600 text-white text-[10px] font-bold min-w-[18px] h-4 px-1 rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                  <span className="absolute -top-1 -right-1 bg-emerald-600 text-white text-[10px] font-bold min-w-[18px] h-4 px-1 rounded-full flex items-center justify-center shadow-xs animate-pulse ring-2 ring-white">
                     {unreadChatCount > 9 ? '9+' : unreadChatCount}
                   </span>
                 )}

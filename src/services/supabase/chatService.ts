@@ -11,6 +11,7 @@ import {
   ChatParticipant,
 } from '../../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { notifyChatMessage } from './notificationService';
 
 // ============================================================================
 // SUPABASE REAL-TIME SECURE MESSAGING SERVICE
@@ -546,13 +547,24 @@ export const sendChatMessage = async (
       saveLocalMessages(safeConvId, [...existingLocal, finalMessage]);
     }
 
-    // Update conversation timestamp locally
+    // Update conversation timestamp and recipient unread count locally
     const curConvs = getLocalConversations();
-    const updatedConvs = curConvs.map(c => c.id === safeConvId ? {
-      ...c,
-      last_message_at: new Date().toISOString(),
-      last_message_preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 100),
-    } : c);
+    const updatedConvs = curConvs.map(c => {
+      if (c.id === safeConvId || c.id === conversationId) {
+        const isSenderOwner = c.owner_id === safeSenderId || c.owner_id === senderId;
+        const currentRenterCount = Number(c.renter_unread_count) || 0;
+        const currentOwnerCount = Number(c.owner_unread_count) || 0;
+        return {
+          ...c,
+          last_message_at: new Date().toISOString(),
+          last_message_preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 100),
+          renter_unread_count: isSenderOwner ? currentRenterCount + 1 : currentRenterCount,
+          owner_unread_count: !isSenderOwner ? currentOwnerCount + 1 : currentOwnerCount,
+          unread_count: (Number(c.unread_count) || 0) + 1,
+        };
+      }
+      return c;
+    });
     saveLocalConversations(updatedConvs);
 
     // Update conversation timestamp in Supabase
@@ -565,20 +577,49 @@ export const sendChatMessage = async (
       .eq('id', safeConvId)
       .then(() => {});
 
+    const broadcastPayload = {
+      conversation_id: safeConvId,
+      sender_id: safeSenderId,
+      receiver_id: safeReceiverId,
+      raw_sender_id: senderId,
+      raw_receiver_id: options?.receiverId,
+      preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 80),
+      created_at: new Date().toISOString(),
+    };
+
     // Broadcast across devices/tabs via Supabase realtime channel
     try {
       getGlobalChatRealtimeChannel().send({
         type: 'broadcast',
         event: 'new_chat_message',
-        payload: {
-          conversation_id: safeConvId,
-          sender_id: safeSenderId,
-          receiver_id: safeReceiverId,
-          preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 80),
-          created_at: new Date().toISOString()
-        }
+        payload: broadcastPayload,
       });
     } catch (e) {}
+
+    // Dispatch locally for instant UI responsiveness & SVG notification badge updates
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(
+          new CustomEvent('iproom_new_chat_message', { detail: broadcastPayload })
+        );
+        window.dispatchEvent(new CustomEvent('iproom_unread_chat_changed'));
+        localStorage.setItem('iproom_chat_last_message', JSON.stringify(broadcastPayload));
+      } catch (e) {}
+    }
+
+    // Trigger in-app notification for the recipient
+    if (options?.receiverId) {
+      notifyChatMessage(
+        options.receiverId,
+        'renter',
+        'Chat Partner',
+        trimmed || (msgType === 'image' ? 'Photo attachment' : 'New message'),
+        'Room Chat',
+        undefined,
+        senderId,
+        safeConvId
+      ).catch(() => {});
+    }
 
     return { message: finalMessage, error: null };
   } catch (err: any) {
@@ -589,6 +630,13 @@ export const sendChatMessage = async (
     };
     const existingLocal = getLocalMessages(safeConvId);
     saveLocalMessages(safeConvId, [...existingLocal, fallbackMsg]);
+
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('iproom_unread_chat_changed'));
+      } catch (e) {}
+    }
+
     return { message: fallbackMsg, error: null };
   }
 };
@@ -676,6 +724,59 @@ export const markConversationAsRead = async (
   const safeConvId = isValidUUID(conversationId) ? conversationId : stringToUUID(conversationId);
   const safeUserId = isValidUUID(currentUserId) ? currentUserId : stringToUUID(currentUserId);
 
+  // 1. Instantly mark local messages as read
+  try {
+    const updateLocalMessageList = (convKey: string) => {
+      const msgs = getLocalMessages(convKey);
+      if (msgs && msgs.length > 0) {
+        let changed = false;
+        const updated = msgs.map((m) => {
+          if (m.sender_id !== safeUserId && m.sender_id !== currentUserId && !m.is_read) {
+            changed = true;
+            return {
+              ...m,
+              is_read: true,
+              read_at: new Date().toISOString(),
+              status: 'read' as const,
+            };
+          }
+          return m;
+        });
+        if (changed) {
+          saveLocalMessages(convKey, updated);
+        }
+      }
+    };
+
+    updateLocalMessageList(safeConvId);
+    if (conversationId !== safeConvId) {
+      updateLocalMessageList(conversationId);
+    }
+  } catch (e) {}
+
+  // 2. Instantly reset unread counts in local conversations
+  try {
+    const localConvs = getLocalConversations();
+    let convsChanged = false;
+    const updatedConvs = localConvs.map((c) => {
+      if (c.id === safeConvId || c.id === conversationId) {
+        convsChanged = true;
+        const isOwner = c.owner_id === safeUserId || c.owner_id === currentUserId;
+        return {
+          ...c,
+          renter_unread_count: isOwner ? c.renter_unread_count : 0,
+          owner_unread_count: isOwner ? 0 : c.owner_unread_count,
+          unread_count: 0,
+        };
+      }
+      return c;
+    });
+    if (convsChanged) {
+      saveLocalConversations(updatedConvs);
+    }
+  } catch (e) {}
+
+  // 3. Update Supabase Postgres database tables
   try {
     await (supabase.from('messages') as any)
       .update({ is_read: true, read_at: new Date().toISOString() })
@@ -692,6 +793,22 @@ export const markConversationAsRead = async (
       .eq('id', safeConvId);
   } catch (err) {
     console.warn('Error marking conversation as read:', err);
+  }
+
+  // 4. Notify all UI components in current window & other tabs
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('iproom_chat_read', {
+          detail: { conversationId: safeConvId, userId: currentUserId },
+        })
+      );
+      window.dispatchEvent(new CustomEvent('iproom_unread_chat_changed'));
+      localStorage.setItem(
+        'iproom_chat_last_read_event',
+        JSON.stringify({ conversationId: safeConvId, userId: currentUserId, t: Date.now() })
+      );
+    } catch (e) {}
   }
 };
 
@@ -1118,22 +1235,33 @@ export const getTotalUnreadCount = async (userId: string): Promise<number> => {
   const safeUserId = isValidUUID(userId) ? userId : stringToUUID(userId);
 
   try {
-    const { data: convs, error } = await (supabase.from('conversations') as any)
-      .select('renter_id, owner_id, renter_unread_count, owner_unread_count')
-      .or(`renter_id.eq.${safeUserId},owner_id.eq.${safeUserId}`)
-      .neq('status', 'archived');
+    // 1. First attempt enriched conversations (combines Postgres + Local cache)
+    const { conversations } = await getUserConversations(userId);
+    if (conversations && conversations.length > 0) {
+      let total = 0;
+      conversations.forEach((c) => {
+        total += Number(c.unread_count) || 0;
+      });
+      return total;
+    }
+  } catch (e) {}
 
-    if (error || !convs) return 0;
-
+  // 2. Direct local cache scan
+  try {
+    const localConvs = getLocalConversations().filter(
+      (c) =>
+        (c.renter_id === safeUserId ||
+          c.owner_id === safeUserId ||
+          c.renter_id === userId ||
+          c.owner_id === userId) &&
+        c.status !== 'archived'
+    );
     let total = 0;
-    convs.forEach((c: any) => {
-      if (c.owner_id === safeUserId) {
-        total += Number(c.owner_unread_count) || 0;
-      } else {
-        total += Number(c.renter_unread_count) || 0;
-      }
+    localConvs.forEach((c) => {
+      const isOwner = c.owner_id === safeUserId || c.owner_id === userId;
+      const count = isOwner ? c.owner_unread_count : c.renter_unread_count;
+      total += Number(count ?? c.unread_count) || 0;
     });
-
     return total;
   } catch {
     return 0;
