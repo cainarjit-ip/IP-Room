@@ -376,8 +376,7 @@ export const getUserNotifications = async (userId: string): Promise<AppNotificat
     if (error || !data) return [];
 
     return data.map(mapNotificationRowToModel);
-  } catch (err) {
-    console.warn('Exception in getUserNotifications:', err);
+  } catch {
     return [];
   }
 };

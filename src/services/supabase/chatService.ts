@@ -1038,7 +1038,6 @@ export const reportChatMessage = async (params: {
 
     let createdReport: ChatReport;
     if (error) {
-      console.warn('Report insert notice:', error.message);
       createdReport = {
         id: `rep_${Date.now()}`,
         ...reportData,

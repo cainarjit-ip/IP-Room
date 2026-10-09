@@ -118,16 +118,12 @@ export const getRoomListings = async (
 
     const { data, error } = await query;
 
-    if (error) {
-      console.warn('Error fetching room listings from Supabase:', error.message);
+    if (error || !data) {
       return [];
     }
 
-    if (!data) return [];
-
     return data.map(mapRoomFromRow);
-  } catch (err: any) {
-    console.warn('Exception in getRoomListings:', err?.message);
+  } catch {
     return [];
   }
 };
@@ -147,14 +143,12 @@ export const getOwnerRoomListings = async (ownerId: string): Promise<RoomListing
       .eq('owner_id', ownerId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.warn('Error fetching owner listings from Supabase:', error.message);
+    if (error || !data) {
       return [];
     }
 
-    return (data || []).map(mapRoomFromRow);
-  } catch (err: any) {
-    console.warn('Exception in getOwnerRoomListings:', err?.message);
+    return data.map(mapRoomFromRow);
+  } catch {
     return [];
   }
 };
@@ -184,18 +178,10 @@ export const uploadRoomImages = async (
         const { data } = supabase.storage.from('room-images').getPublicUrl(filePath);
         if (data?.publicUrl) {
           uploadedUrls.push(data.publicUrl);
-          // Insert into room_images table
-          await (supabase.from('room_images').insert({
-            room_id: roomId,
-            image_url: data.publicUrl,
-            storage_path: filePath,
-            is_primary: i === 0,
-            sort_order: i,
-          } as any) as any);
         }
       }
-    } catch (err) {
-      console.warn(`Failed to upload image ${i}:`, err);
+    } catch {
+      // Continue uploading remaining images
     }
   }
 
@@ -314,25 +300,26 @@ export const deleteRoomListing = async (roomId: string): Promise<boolean> => {
 };
 
 /**
- * Record a room view (analytics)
+ * Record a room view (saved to room_views table)
  */
 export const recordRoomView = async (roomId: string, viewerId?: string): Promise<void> => {
   if (!isValidUUID(roomId)) return;
   const safeViewerId = isValidUUID(viewerId) ? viewerId : null;
 
   try {
-    // Record view in analytics_events table (which exists in the base schema)
-    await (supabase.from('analytics_events').insert({
-      event_type: 'room_view',
-      user_id: safeViewerId,
-      data: { room_id: roomId },
-    } as any) as any);
-  } catch (err) {
-    // Local fallback for offline/resilience
-    try {
-      const views = JSON.parse(localStorage.getItem('iproom_recent_views') || '[]');
-      const updated = [roomId, ...views.filter((id: string) => id !== roomId)].slice(0, 50);
-      localStorage.setItem('iproom_recent_views', JSON.stringify(updated));
-    } catch (e) {}
+    // Record view in room_views table (present in Supabase with public insert policy)
+    await (supabase.from('room_views') as any).insert({
+      room_id: roomId,
+      viewer_id: safeViewerId,
+    });
+  } catch {
+    // Silent fallback
   }
+
+  // Local fallback for offline/resilience
+  try {
+    const views = JSON.parse(localStorage.getItem('iproom_recent_views') || '[]');
+    const updated = [roomId, ...views.filter((id: string) => id !== roomId)].slice(0, 50);
+    localStorage.setItem('iproom_recent_views', JSON.stringify(updated));
+  } catch {}
 };

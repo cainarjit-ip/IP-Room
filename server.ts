@@ -95,9 +95,16 @@ if (targetPort !== 3000) {
   listenOnPort(targetPort);
 }
 
+// Keep process alive indefinitely in container
+setInterval(() => {}, 1000 * 60 * 60);
+
 const shutdown = () => {
   console.log('Shutdown signal received: closing HTTP servers');
-  servers.forEach(s => s.close());
+  servers.forEach(s => {
+    try {
+      s.close();
+    } catch {}
+  });
   process.exit(0);
 };
 

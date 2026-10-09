@@ -21,13 +21,11 @@ export const getUserComparisonRoomIds = async (userId: string | null | undefined
       .eq('user_id', userId as string);
 
     if (error) {
-      console.warn('Error fetching comparisons from Supabase:', error.message);
       return [];
     }
 
     return (data || []).map((row: any) => row.room_id);
-  } catch (err: any) {
-    console.warn('Exception in getUserComparisonRoomIds:', err?.message);
+  } catch {
     return [];
   }
 };

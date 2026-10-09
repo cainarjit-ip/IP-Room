@@ -21,13 +21,11 @@ export const getUserWishlistRoomIds = async (userId: string | null | undefined):
       .eq('user_id', userId as string);
 
     if (error) {
-      console.warn('Error fetching wishlists from Supabase:', error.message);
       return [];
     }
 
     return (data || []).map((row: any) => row.room_id);
-  } catch (err: any) {
-    console.warn('Exception in getUserWishlistRoomIds:', err?.message);
+  } catch {
     return [];
   }
 };

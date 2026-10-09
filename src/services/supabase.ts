@@ -834,16 +834,13 @@ export const trackAnalyticsEvent = async (
     delete sanitizedMetadata.token;
     delete sanitizedMetadata.secret;
 
-    await supabase.from('analytics_events').insert({
-      id: generateUUID(),
-      session_id: sessionId || 'session-default',
-      user_id: safeUserId,
-      event_type: eventType,
-      room_id: safeRoomId,
-      metadata: sanitizedMetadata,
-      created_at: new Date().toISOString(),
-    } as any);
-  } catch (err) {
+    if (eventType === 'room_view' && safeRoomId) {
+      await (supabase.from('room_views') as any).insert({
+        room_id: safeRoomId,
+        viewer_id: safeUserId,
+      });
+    }
+  } catch {
     // Non-blocking telemetry
   }
 };

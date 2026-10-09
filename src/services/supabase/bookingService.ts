@@ -59,13 +59,11 @@ export const getUserBookings = async (
       .order('created_at', { ascending: false }) as any);
 
     if (error) {
-      console.warn('Error fetching bookings from Supabase:', error.message);
       return [];
     }
 
     return (data || []).map(mapBookingRowToModel);
-  } catch (err: any) {
-    console.warn('Exception in getUserBookings:', err?.message);
+  } catch {
     return [];
   }
 };

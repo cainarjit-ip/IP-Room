@@ -38,13 +38,11 @@ export const getProfileById = async (id: string | null | undefined): Promise<Use
       .maybeSingle();
 
     if (error) {
-      console.warn('Error fetching profile from Supabase:', error.message);
       return null;
     }
 
     return data ? mapProfileRowToModel(data) : null;
-  } catch (err: any) {
-    console.warn('Exception in getProfileById:', err?.message);
+  } catch {
     return null;
   }
 };

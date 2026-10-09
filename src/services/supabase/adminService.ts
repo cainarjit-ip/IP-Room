@@ -18,8 +18,7 @@ export const getAllProfiles = async (): Promise<UserProfile[]> => {
 
     if (error || !data) return [];
     return data.map(mapProfileRowToModel);
-  } catch (err) {
-    console.warn('Exception in getAllProfiles:', err);
+  } catch {
     return [];
   }
 };
@@ -92,8 +91,7 @@ export const getAllRoomsForAdmin = async (): Promise<RoomListing[]> => {
     if (error || !data) return [];
 
     return data.map((row: any) => mapRoomRowToModel(row, row.images || []));
-  } catch (err) {
-    console.warn('Exception in getAllRoomsForAdmin:', err);
+  } catch {
     return [];
   }
 };
