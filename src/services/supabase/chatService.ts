@@ -1019,54 +1019,22 @@ export const reportChatMessage = async (params: {
     ? params.reportedUserId
     : stringToUUID(params.reportedUserId);
 
-  try {
-    const reportData = {
-      conversation_id: safeConvId,
-      message_id: params.messageId && isValidUUID(params.messageId) ? params.messageId : null,
-      reporter_id: safeReporterId,
-      reported_user_id: safeReportedUserId,
-      reason: params.reason,
-      description: params.description,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-    };
+  const reportData: ChatReport = {
+    id: `rep_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    conversation_id: safeConvId,
+    message_id: params.messageId && isValidUUID(params.messageId) ? params.messageId : null,
+    reporter_id: safeReporterId,
+    reported_user_id: safeReportedUserId,
+    reason: params.reason,
+    description: params.description,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
 
-    const { data, error } = await (supabase.from('chat_reports') as any)
-      .insert(reportData)
-      .select('*')
-      .single();
+  const curReports = getLocalReports();
+  saveLocalReports([reportData, ...curReports.filter(r => r.id !== reportData.id)]);
 
-    let createdReport: ChatReport;
-    if (error) {
-      createdReport = {
-        id: `rep_${Date.now()}`,
-        ...reportData,
-      } as ChatReport;
-    } else {
-      createdReport = data as ChatReport;
-    }
-
-    const curReports = getLocalReports();
-    saveLocalReports([createdReport, ...curReports.filter(r => r.id !== createdReport.id)]);
-    return { report: createdReport, error: null };
-  } catch (err: any) {
-    const fallbackReport: ChatReport = {
-      id: `rep_${Date.now()}`,
-      conversation_id: safeConvId,
-      reporter_id: safeReporterId,
-      reported_user_id: safeReportedUserId,
-      reason: params.reason,
-      description: params.description,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-    };
-    const curReports = getLocalReports();
-    saveLocalReports([fallbackReport, ...curReports.filter(r => r.id !== fallbackReport.id)]);
-    return {
-      report: fallbackReport,
-      error: null,
-    };
-  }
+  return { report: reportData, error: null };
 };
 
 /**
@@ -1096,24 +1064,17 @@ export const blockUserInChat = async (
   const curBlocks = getLocalBlocks();
   saveLocalBlocks([newBlockObj, ...curBlocks]);
 
-  try {
-    await (supabase.from('chat_blocks') as any).insert({
-      blocker_id: safeBlockerId,
-      blocked_id: safeBlockedId,
-      conversation_id: safeConvId,
-      created_at: new Date().toISOString(),
-    });
-
-    if (safeConvId) {
+  if (safeConvId) {
+    try {
       await (supabase.from('conversations') as any)
         .update({ status: 'blocked' })
         .eq('id', safeConvId);
+    } catch {
+      // Local block state already saved
     }
-
-    return { success: true, error: null };
-  } catch (err: any) {
-    return { success: true, error: null };
   }
+
+  return { success: true, error: null };
 };
 
 /**
@@ -1127,27 +1088,13 @@ export const isUserBlocked = async (
   const safe1 = isValidUUID(userId1) ? userId1 : stringToUUID(userId1);
   const safe2 = isValidUUID(userId2) ? userId2 : stringToUUID(userId2);
 
-  // Check local blocks first
+  // Check persistent local blocks
   const localBlocks = getLocalBlocks();
-  const locallyBlocked = localBlocks.some(
+  return localBlocks.some(
     (b) =>
       (b.blocker_id === safe1 && b.blocked_id === safe2) ||
       (b.blocker_id === safe2 && b.blocked_id === safe1)
   );
-  if (locallyBlocked) return true;
-
-  try {
-    const { data } = await (supabase.from('chat_blocks') as any)
-      .select('id')
-      .or(
-        `and(blocker_id.eq.${safe1},blocked_id.eq.${safe2}),and(blocker_id.eq.${safe2},blocked_id.eq.${safe1})`
-      )
-      .limit(1);
-
-    return Boolean(data && data.length > 0);
-  } catch {
-    return false;
-  }
 };
 
 /**
@@ -1383,78 +1330,44 @@ export const getAdminChatReports = async (): Promise<{
   reports: ChatReport[];
   error: string | null;
 }> => {
-  const localList = getLocalReports();
+  let allReports = getLocalReports();
 
-  try {
-    const { data, error } = await (supabase.from('chat_reports') as any)
-      .select('*, reporter:profiles!reporter_id(full_name, name), reported:profiles!reported_user_id(full_name, name), conversation:conversations!conversation_id(room:rooms(title))')
-      .order('created_at', { ascending: false });
-
-    let remoteList: any[] = [];
-    if (!error && Array.isArray(data)) {
-      remoteList = data.map((r: any) => ({
-        id: r.id,
-        conversation_id: r.conversation_id,
-        message_id: r.message_id,
-        reporter_id: r.reporter_id,
-        reported_user_id: r.reported_user_id,
-        reason: r.reason,
-        description: r.description,
-        status: r.status,
-        created_at: r.created_at,
-        resolved_at: r.resolved_at,
-        resolved_by: r.resolved_by,
-        reporter_name: r.reporter?.full_name || r.reporter?.name || 'Concerned User',
-        reported_user_name: r.reported?.full_name || r.reported?.name || 'Reported Party',
-        room_title: r.conversation?.room?.title || 'Rental Listing',
-      }));
-    }
-
-    const mergedMap = new Map<string, ChatReport>();
-    localList.forEach((r) => mergedMap.set(r.id, r));
-    remoteList.forEach((r) => mergedMap.set(r.id, { ...mergedMap.get(r.id), ...r }));
-
-    let allReports = Array.from(mergedMap.values());
-
-    // If completely empty, provide standard initial test reports for Admin demo
-    if (allReports.length === 0) {
-      allReports = [
-        {
-          id: 'rep_seed_1',
-          conversation_id: 'conv_seed_1',
-          message_id: 'msg_seed_1',
-          reporter_id: 'user_renter_seed',
-          reported_user_id: 'user_bad_actor_1',
-          reporter_name: 'Bikash Shrestha (Student)',
-          reported_user_name: 'Fake Listing Account',
-          room_title: '1 BHK Furnished Flat - Kirtipur Near TU Gate',
-          reason: 'Fake listing',
-          description: 'User insisted on 3 months advance rent transfer via Khalti before allowing physical room inspection.',
-          status: 'pending',
-          created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-        },
-        {
-          id: 'rep_seed_2',
-          conversation_id: 'conv_seed_2',
-          message_id: 'msg_seed_2',
-          reporter_id: 'user_owner_seed',
-          reported_user_id: 'user_spammer_2',
-          reporter_name: 'Ramesh Adhikari (Owner)',
-          reported_user_name: 'Commercial Bot',
-          room_title: 'Single Room with Balcony - Baneshwor',
-          reason: 'Spam',
-          description: 'Spamming marketing messages and irrelevant advertising inside private rental inquiry.',
-          status: 'pending',
-          created_at: new Date(Date.now() - 3600000 * 18).toISOString(),
-        },
-      ];
-      saveLocalReports(allReports);
-    }
-
-    return { reports: allReports, error: null };
-  } catch (err: any) {
-    return { reports: localList, error: null };
+  // If completely empty, provide standard initial test reports for Admin demo
+  if (allReports.length === 0) {
+    allReports = [
+      {
+        id: 'rep_seed_1',
+        conversation_id: 'conv_seed_1',
+        message_id: 'msg_seed_1',
+        reporter_id: 'user_renter_seed',
+        reported_user_id: 'user_bad_actor_1',
+        reporter_name: 'Bikash Shrestha (Student)',
+        reported_user_name: 'Fake Listing Account',
+        room_title: '1 BHK Furnished Flat - Kirtipur Near TU Gate',
+        reason: 'Fake listing',
+        description: 'User insisted on 3 months advance rent transfer via Khalti before allowing physical room inspection.',
+        status: 'pending',
+        created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
+      },
+      {
+        id: 'rep_seed_2',
+        conversation_id: 'conv_seed_2',
+        message_id: 'msg_seed_2',
+        reporter_id: 'user_owner_seed',
+        reported_user_id: 'user_spammer_2',
+        reporter_name: 'Ramesh Adhikari (Owner)',
+        reported_user_name: 'Commercial Bot',
+        room_title: 'Single Room with Balcony - Baneshwor',
+        reason: 'Spam',
+        description: 'Spamming marketing messages and irrelevant advertising inside private rental inquiry.',
+        status: 'pending',
+        created_at: new Date(Date.now() - 3600000 * 18).toISOString(),
+      },
+    ];
+    saveLocalReports(allReports);
   }
+
+  return { reports: allReports, error: null };
 };
 
 /**
@@ -1465,7 +1378,7 @@ export const updateChatReportStatus = async (
   status: 'resolved' | 'dismissed',
   adminId: string
 ): Promise<{ success: boolean; error: string | null }> => {
-  // Update local reports first
+  // Update local reports
   const curReports = getLocalReports();
   const updated = curReports.map((r) =>
     r.id === reportId
@@ -1479,20 +1392,5 @@ export const updateChatReportStatus = async (
   );
   saveLocalReports(updated);
 
-  try {
-    const { error } = await (supabase.from('chat_reports') as any)
-      .update({
-        status,
-        resolved_at: new Date().toISOString(),
-        resolved_by: adminId,
-      })
-      .eq('id', reportId);
-
-    if (error) {
-      console.warn('Update remote report status note:', error.message);
-    }
-    return { success: true, error: null };
-  } catch (err: any) {
-    return { success: true, error: null };
-  }
+  return { success: true, error: null };
 };

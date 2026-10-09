@@ -89,9 +89,8 @@ function listenOnPort(p: number) {
 // 1. Always bind to port 3000 (used by Nginx internal reverse proxy and dev container)
 listenOnPort(3000);
 
-// 2. If Cloud Run provides a target PORT (typically 8080) and it differs from 3000, also bind to it
-const targetPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
-if (targetPort !== 3000) {
+const targetPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+if (targetPort && targetPort !== 3000 && !isNaN(targetPort)) {
   listenOnPort(targetPort);
 }
 

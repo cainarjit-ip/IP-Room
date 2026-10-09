@@ -135,5 +135,42 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- 5. REFRESH SCHEMA CACHE
+-- 5. CREATE chat_reports and chat_blocks TABLES
+CREATE TABLE IF NOT EXISTS public.chat_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID REFERENCES public.conversations(id) ON DELETE CASCADE,
+  message_id UUID REFERENCES public.messages(id) ON DELETE SET NULL,
+  reporter_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  reported_user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  resolved_at TIMESTAMPTZ,
+  resolved_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.chat_blocks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  blocker_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  blocked_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  conversation_id UUID REFERENCES public.conversations(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 6. CREATE payments TABLE
+CREATE TABLE IF NOT EXISTS public.payments (
+  id TEXT PRIMARY KEY,
+  booking_id UUID,
+  room_id UUID,
+  user_id UUID,
+  amount NUMERIC NOT NULL,
+  currency TEXT DEFAULT 'NPR',
+  method TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed',
+  reference_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 7. REFRESH SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';
