@@ -19,6 +19,7 @@ import {
   addNotificationListener,
   CURRENT_CLIENT_SESSION_ID,
 } from '../services/supabase/notificationService';
+import { isValidUUID, stringToUUID } from '../services/supabase';
 import { UserProfile, UserRole, Language } from '../types';
 
 interface NotificationCenterProps {
@@ -77,14 +78,23 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         return;
       }
 
-      // 2. Notification must match the recipient's active role or be for all
-      if (notif.toRole !== 'all' && notif.toRole !== activeRole) {
-        return;
-      }
+      // 2. Direct user messages (e.g. chat messages) targeted to this user take precedence
+      const isDirectlyTargeted =
+        currentUser?.id &&
+        notif.toUserId &&
+        notif.toUserId !== 'all' &&
+        (notif.toUserId === currentUser.id ||
+          (isValidUUID(currentUser.id) && notif.toUserId === currentUser.id) ||
+          (!isValidUUID(currentUser.id) && notif.toUserId === stringToUUID(currentUser.id)));
 
-      // 3. If directed to a specific user ID, ensure it matches current user or current role
-      if (notif.toUserId && notif.toUserId !== 'all') {
-        if (currentUser?.id && notif.toUserId !== currentUser.id && notif.toRole !== activeRole) {
+      if (!isDirectlyTargeted) {
+        // Notification must match the recipient's active role or be for all
+        if (notif.toRole !== 'all' && notif.toRole !== activeRole) {
+          return;
+        }
+
+        // If directed to another specific user ID, do not display
+        if (notif.toUserId && notif.toUserId !== 'all' && notif.toUserId !== currentUser?.id) {
           return;
         }
       }

@@ -383,8 +383,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }`}
                 />
                 {unreadChatCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-emerald-600 text-white text-[10px] font-bold min-w-[18px] h-4 px-1 rounded-full flex items-center justify-center shadow-xs animate-pulse ring-2 ring-white">
-                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-[18px] items-center justify-center">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex items-center justify-center rounded-full h-4 min-w-[18px] px-1 bg-emerald-600 text-white text-[10px] font-bold shadow-xs ring-2 ring-white">
+                      {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                    </span>
                   </span>
                 )}
               </button>

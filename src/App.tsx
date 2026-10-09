@@ -443,22 +443,36 @@ export default function App() {
     // 3. Foreground listener for real-time in-app broadcasts
     let unsubscribeForeground: (() => void) | null = null;
     setupForegroundFCMListener(incomingNotif => {
-      // Do not notify if sender is the same user and not targeted to the active role
-      if (
+      // Do not notify if sender is the same user
+      const isSenderSelf =
         currentUser?.id &&
         incomingNotif.data?.senderId &&
-        incomingNotif.data.senderId === currentUser.id &&
-        incomingNotif.toRole !== activeRole
-      ) {
+        (incomingNotif.data.senderId === currentUser.id ||
+          (isValidUUID(currentUser.id) && incomingNotif.data.senderId === currentUser.id) ||
+          (!isValidUUID(currentUser.id) && incomingNotif.data.senderId === stringToUUID(currentUser.id)));
+
+      if (isSenderSelf) {
         return;
       }
 
+      // Check if directly addressed to current user
+      const isDirectUser =
+        incomingNotif.toUserId &&
+        currentUser?.id &&
+        (incomingNotif.toUserId === currentUser.id ||
+          incomingNotif.toUserId === 'all' ||
+          (isValidUUID(currentUser.id) && incomingNotif.toUserId === currentUser.id) ||
+          (!isValidUUID(currentUser.id) && incomingNotif.toUserId === stringToUUID(currentUser.id)));
+
       // Notification must match active role or current user
       const matchesRole = !incomingNotif.toRole || incomingNotif.toRole === 'all' || incomingNotif.toRole === activeRole;
-      const matchesUser = !incomingNotif.toUserId || incomingNotif.toUserId === 'all' || incomingNotif.toUserId === currentUserId;
 
-      if (!matchesRole && !matchesUser) {
+      if (!matchesRole && !isDirectUser) {
         return;
+      }
+
+      if (incomingNotif.type === 'chat_message') {
+        getTotalUnreadCount(currentUserId).then(count => setUnreadChatCount(count));
       }
 
       setNotifications(prev => {
@@ -592,15 +606,20 @@ export default function App() {
 
     const checkAndHandlePayload = (payload: any) => {
       if (!payload) return;
-      const isSender = payload.sender_id === currentUser.id || payload.raw_sender_id === currentUser.id;
+      const safeMyId = isValidUUID(currentUser.id) ? currentUser.id : stringToUUID(currentUser.id);
+      const isSender =
+        payload.sender_id === currentUser.id ||
+        payload.sender_id === safeMyId ||
+        payload.raw_sender_id === currentUser.id;
       if (isSender) return;
 
       const isRecipient =
+        !payload.receiver_id ||
         payload.receiver_id === currentUser.id ||
+        payload.receiver_id === safeMyId ||
         payload.raw_receiver_id === currentUser.id ||
         payload.toUserId === currentUser.id ||
-        (currentUser.id && payload.receiver_id && isValidUUID(currentUser.id) && payload.receiver_id === currentUser.id) ||
-        (currentUser.id && payload.receiver_id && !isValidUUID(currentUser.id) && payload.receiver_id === stringToUUID(currentUser.id));
+        payload.toUserId === safeMyId;
 
       if (isRecipient) {
         refreshUnread();

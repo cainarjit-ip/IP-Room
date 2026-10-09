@@ -328,16 +328,34 @@ export const getUserConversations = async (
 
     // Include locally created conversations as well for full resilience
     const localConvs = getLocalConversations().filter(
-      (c) => (c.renter_id === safeUserId || c.owner_id === safeUserId) && c.status !== 'archived'
+      (c) =>
+        (c.renter_id === safeUserId ||
+          c.owner_id === safeUserId ||
+          c.renter_id === userId ||
+          c.owner_id === userId) &&
+        c.status !== 'archived'
     );
 
     const remoteList: any[] = (!convError && Array.isArray(convs)) ? convs : [];
     const convMap = new Map<string, any>();
     
-    // Add local first
-    localConvs.forEach((c) => convMap.set(c.id, c));
-    // Add remote (takes precedence if available)
-    remoteList.forEach((c) => convMap.set(c.id, { ...convMap.get(c.id), ...c }));
+    // Add remote first
+    remoteList.forEach((c) => convMap.set(c.id, c));
+    // Local conversations override remote for active state (such as read status and immediate updates)
+    localConvs.forEach((local) => {
+      const existing = convMap.get(local.id);
+      if (existing) {
+        convMap.set(local.id, {
+          ...existing,
+          ...local,
+          unread_count: local.unread_count !== undefined ? local.unread_count : existing.unread_count,
+          renter_unread_count: local.renter_unread_count !== undefined ? local.renter_unread_count : existing.renter_unread_count,
+          owner_unread_count: local.owner_unread_count !== undefined ? local.owner_unread_count : existing.owner_unread_count,
+        });
+      } else {
+        convMap.set(local.id, local);
+      }
+    });
 
     const convList: any[] = Array.from(convMap.values());
     if (convList.length === 0) {
@@ -347,7 +365,10 @@ export const getUserConversations = async (
     const roomIds = Array.from(new Set(convList.map((c) => c.room_id || c.listing_id).filter(Boolean)));
     const partnerIds = Array.from(
       new Set(
-        convList.map((c) => (c.renter_id === safeUserId ? c.owner_id : c.renter_id)).filter(Boolean)
+        convList.map((c) => {
+          const isMeRenter = c.renter_id === safeUserId || c.renter_id === userId;
+          return isMeRenter ? c.owner_id : c.renter_id;
+        }).filter(Boolean)
       )
     );
     const convIds = convList.map((c) => c.id);
@@ -398,12 +419,45 @@ export const getUserConversations = async (
       const targetRoomId = c.room_id || c.listing_id;
       const cMsgs = messagesByConv.get(c.id) || [];
       const localMsgs = getLocalMessages(c.id);
-      const allMsgs = [...cMsgs, ...localMsgs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      // Deduplicate messages by ID, prioritizing local read status if locally marked as read
+      const msgMap = new Map<string, DbMessage>();
+      cMsgs.forEach((m) => msgMap.set(m.id, m));
+      localMsgs.forEach((m) => {
+        const existing = msgMap.get(m.id);
+        if (existing) {
+          msgMap.set(m.id, {
+            ...existing,
+            ...m,
+            is_read: m.is_read !== undefined ? m.is_read : existing.is_read,
+          });
+        } else {
+          msgMap.set(m.id, m);
+        }
+      });
+
+      const allMsgs = Array.from(msgMap.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
       const lastMsg = allMsgs[0];
-      const isOwner = c.owner_id === safeUserId;
-      const unreadCount = isOwner
-        ? c.owner_unread_count || allMsgs.filter((m) => m.sender_id !== safeUserId && !m.is_read).length
-        : c.renter_unread_count || allMsgs.filter((m) => m.sender_id !== safeUserId && !m.is_read).length;
+      const isOwner = c.owner_id === safeUserId || c.owner_id === userId;
+
+      // Determine unread count strictly:
+      let unreadCount = 0;
+      const explicitCount = isOwner ? c.owner_unread_count : c.renter_unread_count;
+      if (explicitCount !== undefined && explicitCount !== null) {
+        unreadCount = Math.max(0, Number(explicitCount));
+      } else if (c.unread_count !== undefined && c.unread_count !== null) {
+        unreadCount = Math.max(0, Number(c.unread_count));
+      } else {
+        unreadCount = allMsgs.filter((m) => {
+          const isSenderMe =
+            m.sender_id === safeUserId ||
+            m.sender_id === userId ||
+            (m as any).raw_sender_id === userId;
+          return !isSenderMe && !m.is_read;
+        }).length;
+      }
 
       return {
         ...c,

@@ -43,24 +43,34 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'unread'>('all');
   const [isLoading, setIsLoading] = useState(true);
+  const selectedConvRef = React.useRef<DbConversation | null>(null);
+  selectedConvRef.current = selectedConversation;
 
   // Load conversations for the user
   const loadConversations = async () => {
     const { conversations: list } = await getUserConversations(currentUser.id);
-    setConversations(list);
+    const activeId = selectedConvRef.current?.id || initialConversationId;
+
+    const sanitized = list.map((c) =>
+      c.id === activeId
+        ? { ...c, unread_count: 0, renter_unread_count: 0, owner_unread_count: 0 }
+        : c
+    );
+
+    setConversations(sanitized);
     setIsLoading(false);
 
     // Auto-select initial conversation if specified
     if (initialConversationId) {
-      const match = list.find((c) => c.id === initialConversationId);
+      const match = sanitized.find((c) => c.id === initialConversationId);
       if (match) {
         setSelectedConversation(match);
         markConversationAsRead(match.id, currentUser.id);
         if (onUnreadChanged) onUnreadChanged();
       }
-    } else if (!selectedConversation && list.length > 0 && window.innerWidth >= 1024) {
+    } else if (!selectedConversation && sanitized.length > 0 && window.innerWidth >= 1024) {
       // On desktop, auto-select the first conversation if none selected
-      setSelectedConversation(list[0]);
+      setSelectedConversation(sanitized[0]);
     }
   };
 
@@ -70,19 +80,16 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
 
   // Handle user selecting/reading a conversation
   const handleSelectConversation = (conv: DbConversation) => {
-    setSelectedConversation(conv);
+    const zeroed = {
+      ...conv,
+      unread_count: 0,
+      renter_unread_count: 0,
+      owner_unread_count: 0,
+    };
+    setSelectedConversation(zeroed);
     // 1. Optimistically clear unread badge from state immediately
     setConversations((prev) =>
-      prev.map((c) =>
-        c.id === conv.id
-          ? {
-              ...c,
-              unread_count: 0,
-              renter_unread_count: 0,
-              owner_unread_count: 0,
-            }
-          : c
-      )
+      prev.map((c) => (c.id === conv.id ? zeroed : c))
     );
     // 2. Mark as read in storage and backend
     markConversationAsRead(conv.id, currentUser.id);
@@ -95,7 +102,13 @@ export const ChatInbox: React.FC<ChatInboxProps> = ({
   useEffect(() => {
     const handleSync = () => {
       getUserConversations(currentUser.id).then(({ conversations: list }) => {
-        setConversations(list);
+        const activeId = selectedConvRef.current?.id;
+        const sanitized = list.map((c) =>
+          c.id === activeId
+            ? { ...c, unread_count: 0, renter_unread_count: 0, owner_unread_count: 0 }
+            : c
+        );
+        setConversations(sanitized);
       });
     };
 

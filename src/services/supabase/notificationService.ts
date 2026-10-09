@@ -283,10 +283,10 @@ export const notifyStudentOfBookingConfirmed = async (
  */
 export const notifyChatMessage = async (
   recipientId: string,
-  recipientRole: 'renter' | 'owner',
-  senderName: string,
-  messageText: string,
-  roomTitle: string,
+  recipientRole: 'renter' | 'owner' | 'all' = 'all',
+  senderName: string = 'User',
+  messageText: string = '',
+  roomTitle: string = 'Room Chat',
   roomId?: string,
   senderId?: string,
   conversationId?: string
@@ -294,7 +294,7 @@ export const notifyChatMessage = async (
   const shortMsg = messageText.length > 70 ? messageText.substring(0, 67) + '...' : messageText;
   return sendPushNotification({
     toUserId: recipientId,
-    toRole: recipientRole,
+    toRole: 'all', // Direct chat messages should alert the recipient regardless of role tab view
     type: 'chat_message',
     title: `New Message from ${senderName} 💬`,
     body: `"${shortMsg}" — ${roomTitle}`,
