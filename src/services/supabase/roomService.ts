@@ -321,11 +321,18 @@ export const recordRoomView = async (roomId: string, viewerId?: string): Promise
   const safeViewerId = isValidUUID(viewerId) ? viewerId : null;
 
   try {
-    await (supabase.from('room_views').insert({
-      room_id: roomId,
-      viewer_id: safeViewerId,
+    // Record view in analytics_events table (which exists in the base schema)
+    await (supabase.from('analytics_events').insert({
+      event_type: 'room_view',
+      user_id: safeViewerId,
+      data: { room_id: roomId },
     } as any) as any);
   } catch (err) {
-    // Non-critical operation
+    // Local fallback for offline/resilience
+    try {
+      const views = JSON.parse(localStorage.getItem('iproom_recent_views') || '[]');
+      const updated = [roomId, ...views.filter((id: string) => id !== roomId)].slice(0, 50);
+      localStorage.setItem('iproom_recent_views', JSON.stringify(updated));
+    } catch (e) {}
   }
 };

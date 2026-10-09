@@ -37,6 +37,8 @@ import {
   Phone,
   Radio,
   Sparkles,
+  Database,
+  Copy,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -55,6 +57,66 @@ interface AdminDashboardProps {
   onSelectRoom: (room: RoomListing) => void;
 }
 
+const FIX_SQL_SCRIPT = `-- 1. CREATE room_views TABLE (Fixes 404 error)
+CREATE TABLE IF NOT EXISTS public.room_views (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id UUID REFERENCES public.rooms(id) ON DELETE CASCADE,
+  viewer_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  viewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_views_room_id ON public.room_views(room_id);
+ALTER TABLE public.room_views ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow public insert room_views" ON public.room_views FOR INSERT WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow public select room_views" ON public.room_views FOR SELECT USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 2. UPDATE conversations TABLE (Fixes last_message_at 400 error)
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS room_id UUID REFERENCES public.rooms(id) ON DELETE CASCADE;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS listing_id UUID REFERENCES public.rooms(id) ON DELETE CASCADE;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS renter_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS last_message_preview TEXT DEFAULT 'Conversation started';
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS renter_unread_count INT NOT NULL DEFAULT 0;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS owner_unread_count INT NOT NULL DEFAULT 0;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
+-- 3. UPDATE messages TABLE (Fixes &is_read=eq.false 400 error)
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS receiver_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS message_text TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS content TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS message_type TEXT DEFAULT 'text';
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS attachment_type TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- 4. UPDATE notifications TABLE (Fixes PATCH notifications 400 error)
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS reference_id TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS link TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}'::jsonb;
+
+-- 5. REFRESH SCHEMA CACHE
+NOTIFY pgrst, 'reload schema';`;
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   rooms,
   disputes,
@@ -71,7 +133,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSelectRoom,
 }) => {
   const t = getTranslation(language);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history' | 'chat-reports'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'all' | 'disputes' | 'history' | 'chat-reports' | 'database-fix'>('pending');
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // Chat Moderation & Reports State (Requirement 18)
   const [chatReports, setChatReports] = useState<ChatReport[]>([]);
@@ -361,11 +424,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('database-fix')}
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition cursor-pointer ${
+              activeTab === 'database-fix'
+                ? 'border-indigo-600 text-indigo-800 bg-indigo-50/60 rounded-t-xl'
+                : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+            }`}
+          >
+            <Database className="w-4 h-4 text-indigo-600" />
+            <span>Database & SQL Fix</span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono px-1.5 py-0.5 rounded-full font-bold">
+              Fix Schema
+            </span>
+          </button>
         </div>
       </div>
 
       {/* Main Moderation Listing Section (For pending, approved, rejected, all tabs) */}
-      {activeTab !== 'disputes' && activeTab !== 'history' && activeTab !== 'chat-reports' && (
+      {activeTab !== 'disputes' && activeTab !== 'history' && activeTab !== 'chat-reports' && activeTab !== 'database-fix' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
           {/* Search & Filter Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -1006,6 +1085,101 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Database Schema Fix Section */}
+      {activeTab === 'database-fix' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-base text-slate-900">
+                  Supabase Database Schema & Column Fix Guide
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Run this SQL script in your Supabase SQL Editor to resolve all 400 & 404 missing column/table console warnings permanently.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <a
+                href="https://supabase.com/dashboard/project/stygqxxldbegjilpzlco/sql"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open Supabase SQL Editor</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(FIX_SQL_SCRIPT);
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 3000);
+                  showNotification('SQL Script copied to clipboard! Paste it into Supabase SQL Editor.');
+                }}
+                className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+              >
+                {copiedSql ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy SQL Script'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Explanation cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50">
+              <span className="font-bold text-xs text-emerald-900 block mb-1">1. Frontend Self-Healing</span>
+              <p className="text-[11px] text-emerald-700 leading-relaxed">
+                Frontend self-healing is <strong>ACTIVE</strong>. Fallback local caching prevents any page crashes or UI lockouts.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50">
+              <span className="font-bold text-xs text-indigo-900 block mb-1">2. room_views (404)</span>
+              <p className="text-[11px] text-indigo-700 leading-relaxed">
+                Creates the missing <code>room_views</code> analytics table with public insert and select policies.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50">
+              <span className="font-bold text-xs text-indigo-900 block mb-1">3. conversations (400)</span>
+              <p className="text-[11px] text-indigo-700 leading-relaxed">
+                Adds <code>last_message_at</code>, <code>renter_unread_count</code>, <code>owner_unread_count</code>, and participant IDs.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50">
+              <span className="font-bold text-xs text-indigo-900 block mb-1">4. messages (400)</span>
+              <p className="text-[11px] text-indigo-700 leading-relaxed">
+                Adds <code>read_at</code>, <code>receiver_id</code>, and text column aliases for complete chat synchronization.
+              </p>
+            </div>
+          </div>
+
+          {/* Code block */}
+          <div className="relative">
+            <div className="flex items-center justify-between px-4 py-2 bg-slate-900 text-slate-300 text-xs font-mono rounded-t-xl border-b border-slate-800">
+              <span>FIX_DATABASE_ERRORS.sql</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(FIX_SQL_SCRIPT);
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 3000);
+                  showNotification('SQL Script copied to clipboard!');
+                }}
+                className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer"
+              >
+                {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSql ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+            <pre className="p-4 bg-slate-950 text-slate-100 font-mono text-xs rounded-b-xl overflow-x-auto max-h-96 leading-relaxed border border-slate-800">
+              {FIX_SQL_SCRIPT}
+            </pre>
+          </div>
         </div>
       )}
 

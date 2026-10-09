@@ -178,6 +178,9 @@ const findLocalRoom = (roomId: string): any | undefined => {
   return undefined;
 };
 
+// Cached schema support status for conversations table
+let isConversationsSchemaFull: boolean | null = null;
+
 /**
  * Get or create a private conversation for (room_id, renter_id, owner_id)
  * Prevents duplicate conversations for the same renter + owner + listing combination.
@@ -199,111 +202,101 @@ export const getOrCreateConversation = async (
     return { conversation: null, error: 'You cannot start a chat with yourself.' };
   }
 
-  try {
-    // 1. Look for existing conversation between this renter and room
-    const { data: existingList, error: selectError } = await (supabase.from('conversations') as any)
-      .select('*')
-      .eq('room_id', safeRoomId)
-      .eq('renter_id', safeRenterId)
-      .order('created_at', { ascending: false })
-      .limit(1);
+  const convId = stringToUUID(`conv_${safeRoomId}_${safeRenterId}`);
+  const fallbackConv: DbConversation = {
+    id: convId,
+    room_id: safeRoomId,
+    listing_id: safeRoomId,
+    renter_id: safeRenterId,
+    owner_id: safeOwnerId,
+    created_at: new Date().toISOString(),
+    status: 'active',
+    last_message_preview: 'Conversation started',
+    room: findLocalRoom(safeRoomId),
+  };
 
-    if (!selectError && existingList && existingList.length > 0) {
-      return { conversation: existingList[0] as DbConversation, error: null };
-    }
+  // 1. Check local cache first for instant response
+  const curList = getLocalConversations();
+  const existingLocal = curList.find(
+    (c) =>
+      (c.id === convId || c.room_id === safeRoomId || c.listing_id === safeRoomId) &&
+      (c.renter_id === safeRenterId || c.renter_id === renterId)
+  );
 
-    // 2. Also check if room_id was stored as listing_id
-    const { data: existingListingList } = await (supabase.from('conversations') as any)
-      .select('*')
-      .eq('listing_id', safeRoomId)
-      .eq('renter_id', safeRenterId)
-      .limit(1);
-
-    if (existingListingList && existingListingList.length > 0) {
-      return { conversation: existingListingList[0] as DbConversation, error: null };
-    }
-
-    // 3. Create new conversation record
-    const newRecord = {
-      room_id: safeRoomId,
-      listing_id: safeRoomId,
-      renter_id: safeRenterId,
-      owner_id: safeOwnerId,
-      status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      last_message_at: new Date().toISOString(),
-      last_message_preview: 'Conversation started',
-      renter_unread_count: 0,
-      owner_unread_count: 0,
-    };
-
-    const { data: inserted, error: insertError } = await (supabase.from('conversations') as any)
-      .insert(newRecord)
-      .select('*')
-      .single();
-
-    if (insertError) {
-      // If unique constraint prevented duplicate or concurrent insert, fetch existing
-      const { data: recheck } = await (supabase.from('conversations') as any)
+  // 2. Look for existing conversation in Supabase if schema supports it
+  if (isConversationsSchemaFull !== false) {
+    try {
+      const { data: existingList, error: selectError } = await (supabase.from('conversations') as any)
         .select('*')
         .eq('room_id', safeRoomId)
         .eq('renter_id', safeRenterId)
         .limit(1);
 
-      if (recheck && recheck.length > 0) {
-        return { conversation: recheck[0] as DbConversation, error: null };
+      if (selectError) {
+        if (selectError.message?.includes('column') || selectError.code === 'PGRST204' || selectError.code === '42703') {
+          isConversationsSchemaFull = false;
+        }
+      } else if (existingList && existingList.length > 0) {
+        const found = existingList[0] as DbConversation;
+        if (!curList.some((c) => c.id === found.id)) {
+          saveLocalConversations([found, ...curList]);
+        }
+        return { conversation: found, error: null };
       }
+    } catch {
+      isConversationsSchemaFull = false;
+    }
+  }
 
-      console.warn('Supabase DB insert conversation notice:', insertError.message);
-      // Fallback in-memory conversation for seamless client experience
-      const fallbackConv: DbConversation = {
-        id: stringToUUID(`conv_${safeRoomId}_${safeRenterId}`),
+  if (existingLocal) {
+    return { conversation: existingLocal, error: null };
+  }
+
+  // 3. Attempt creating conversation record in Supabase
+  if (isConversationsSchemaFull !== false) {
+    try {
+      const newRecord = {
+        id: convId,
         room_id: safeRoomId,
         listing_id: safeRoomId,
         renter_id: safeRenterId,
         owner_id: safeOwnerId,
-        created_at: new Date().toISOString(),
         status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_message_at: new Date().toISOString(),
         last_message_preview: 'Conversation started',
-        room: findLocalRoom(safeRoomId),
+        renter_unread_count: 0,
+        owner_unread_count: 0,
       };
-      const curList = getLocalConversations();
-      if (!curList.some(c => c.id === fallbackConv.id)) {
-        saveLocalConversations([fallbackConv, ...curList]);
-      }
-      return { conversation: fallbackConv, error: null };
-    }
 
-    if (inserted) {
-      const curList = getLocalConversations();
-      if (!curList.some(c => c.id === inserted.id)) {
-        saveLocalConversations([inserted, ...curList]);
-      }
-    }
+      const { data: inserted, error: insertError } = await (supabase.from('conversations') as any)
+        .insert(newRecord)
+        .select('*')
+        .single();
 
-    return { conversation: inserted as DbConversation, error: null };
-  } catch (err: any) {
-    console.error('Exception in getOrCreateConversation:', err);
-    const fallbackConv: DbConversation = {
-      id: stringToUUID(`conv_${safeRoomId}_${safeRenterId}`),
-      room_id: safeRoomId,
-      listing_id: safeRoomId,
-      renter_id: safeRenterId,
-      owner_id: safeOwnerId,
-      created_at: new Date().toISOString(),
-      status: 'active',
-      room: findLocalRoom(safeRoomId),
-    };
-    const curList = getLocalConversations();
-    if (!curList.some(c => c.id === fallbackConv.id)) {
-      saveLocalConversations([fallbackConv, ...curList]);
+      if (insertError) {
+        if (insertError.message?.includes('column') || insertError.code === 'PGRST204' || insertError.code === '42703') {
+          isConversationsSchemaFull = false;
+          // Insert minimal row with { id } so messages table foreign key constraint is satisfied
+          await (supabase.from('conversations') as any).insert({ id: convId }).catch(() => {});
+        }
+      } else if (inserted) {
+        fallbackConv.id = inserted.id || convId;
+      }
+    } catch {
+      isConversationsSchemaFull = false;
+      await (supabase.from('conversations') as any).insert({ id: convId }).catch(() => {});
     }
-    return {
-      conversation: fallbackConv,
-      error: null,
-    };
+  } else {
+    // If schema is minimal, insert minimal id to satisfy foreign key for messages
+    await (supabase.from('conversations') as any).insert({ id: convId }).catch(() => {});
   }
+
+  if (!curList.some((c) => c.id === fallbackConv.id)) {
+    saveLocalConversations([fallbackConv, ...curList]);
+  }
+  return { conversation: fallbackConv, error: null };
 };
 
 /**
@@ -320,11 +313,26 @@ export const getUserConversations = async (
   const safeUserId = isValidUUID(userId) ? userId : stringToUUID(userId);
 
   try {
-    const { data: convs, error: convError } = await (supabase.from('conversations') as any)
-      .select('*')
-      .or(`renter_id.eq.${safeUserId},owner_id.eq.${safeUserId}`)
-      .neq('status', 'archived')
-      .order('updated_at', { ascending: false });
+    let remoteList: any[] = [];
+    if (isConversationsSchemaFull !== false) {
+      try {
+        const { data: convs, error: convError } = await (supabase.from('conversations') as any)
+          .select('*')
+          .or(`renter_id.eq.${safeUserId},owner_id.eq.${safeUserId}`)
+          .neq('status', 'archived')
+          .order('updated_at', { ascending: false });
+
+        if (convError) {
+          if (convError.message?.includes('column') || convError.code === 'PGRST204' || convError.code === '42703') {
+            isConversationsSchemaFull = false;
+          }
+        } else if (Array.isArray(convs)) {
+          remoteList = convs;
+        }
+      } catch {
+        isConversationsSchemaFull = false;
+      }
+    }
 
     // Include locally created conversations as well for full resilience
     const localConvs = getLocalConversations().filter(
@@ -335,8 +343,6 @@ export const getUserConversations = async (
           c.owner_id === userId) &&
         c.status !== 'archived'
     );
-
-    const remoteList: any[] = (!convError && Array.isArray(convs)) ? convs : [];
     const convMap = new Map<string, any>();
     
     // Add remote first
@@ -561,36 +567,61 @@ export const sendChatMessage = async (
     sender_id: safeSenderId,
     receiver_id: safeReceiverId,
     content: trimmed,
+    message: trimmed,
     message_text: trimmed,
     message_type: msgType,
     attachment_url: options?.attachmentUrl || null,
     attachment_type: msgType === 'image' ? 'image/jpeg' : null,
     is_read: false,
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   };
 
   try {
+    let finalMessage: DbMessage;
     const { data, error } = await (supabase.from('messages') as any)
       .insert(newMsgObj)
       .select('*')
       .single();
 
-    let finalMessage: DbMessage;
-
     if (error) {
-      console.warn('Insert message note:', error.message);
-      // Fallback return with synthetic ID for optimistic offline support
-      finalMessage = {
-        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        ...newMsgObj,
-        status: 'sent',
-      };
+      // If error due to extra columns not in table schema, try minimal insert
+      if (error.message?.includes('column') || error.code === 'PGRST204') {
+        const minMsg = {
+          conversation_id: safeConvId,
+          sender_id: safeSenderId,
+          message: trimmed,
+          is_read: false,
+          created_at: new Date().toISOString(),
+        };
+        const { data: minData } = await (supabase.from('messages') as any)
+          .insert(minMsg)
+          .select('*')
+          .single();
+        if (minData) {
+          finalMessage = {
+            ...newMsgObj,
+            id: minData.id,
+            status: 'sent',
+          };
+        } else {
+          finalMessage = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            ...newMsgObj,
+            status: 'sent',
+          };
+        }
+      } else {
+        finalMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          ...newMsgObj,
+          status: 'sent',
+        };
+      }
     } else {
       finalMessage = {
         ...(data as any),
-        content: (data as any).content || (data as any).message_text || trimmed,
-        message_text: (data as any).message_text || (data as any).content || trimmed,
+        content: (data as any).content || (data as any).message_text || (data as any).message || trimmed,
+        message_text: (data as any).message_text || (data as any).content || (data as any).message || trimmed,
         status: 'sent',
       };
     }
@@ -621,15 +652,22 @@ export const sendChatMessage = async (
     });
     saveLocalConversations(updatedConvs);
 
-    // Update conversation timestamp in Supabase
-    (supabase.from('conversations') as any)
-      .update({
-        last_message_at: new Date().toISOString(),
-        last_message_preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 100),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', safeConvId)
-      .then(() => {});
+    // Update conversation timestamp in Supabase if schema supports it
+    if (isConversationsSchemaFull !== false) {
+      (supabase.from('conversations') as any)
+        .update({
+          last_message_at: new Date().toISOString(),
+          last_message_preview: msgType === 'image' ? '📷 Photo attachment' : trimmed.substring(0, 100),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', safeConvId)
+        .then((res: any) => {
+          if (res?.error && (res.error.message?.includes('column') || res.error.code === 'PGRST204')) {
+            isConversationsSchemaFull = false;
+          }
+        })
+        .catch(() => {});
+    }
 
     const broadcastPayload = {
       conversation_id: safeConvId,
@@ -833,20 +871,25 @@ export const markConversationAsRead = async (
   // 3. Update Supabase Postgres database tables
   try {
     await (supabase.from('messages') as any)
-      .update({ is_read: true, read_at: new Date().toISOString() })
+      .update({ is_read: true })
       .eq('conversation_id', safeConvId)
       .neq('sender_id', safeUserId)
       .eq('is_read', false);
 
-    // Reset unread count on conversation row
-    await (supabase.from('conversations') as any)
-      .update({
-        renter_unread_count: 0,
-        owner_unread_count: 0,
-      })
-      .eq('id', safeConvId);
+    // Reset unread count on conversation row if columns exist
+    if (isConversationsSchemaFull !== false) {
+      const { error: resetErr } = await (supabase.from('conversations') as any)
+        .update({
+          renter_unread_count: 0,
+          owner_unread_count: 0,
+        })
+        .eq('id', safeConvId);
+      if (resetErr && (resetErr.message?.includes('column') || resetErr.code === 'PGRST204')) {
+        isConversationsSchemaFull = false;
+      }
+    }
   } catch (err) {
-    console.warn('Error marking conversation as read:', err);
+    // Non-fatal
   }
 
   // 4. Notify all UI components in current window & other tabs

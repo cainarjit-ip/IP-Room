@@ -413,12 +413,19 @@ export const markNotificationAsRead = async (notificationId: string): Promise<bo
   if (!authUser) return true;
 
   try {
-    const { error } = await (supabase
-      .from('notifications') as any)
-      .update({ is_read: true, read: true })
+    // Attempt updating is_read first
+    let res = await (supabase.from('notifications') as any)
+      .update({ is_read: true })
       .eq('id', notificationId);
 
-    return !error;
+    // If 'is_read' column does not exist in schema cache, try 'read' column
+    if (res.error && (res.error.message?.includes('column') || res.error.code === 'PGRST204')) {
+      res = await (supabase.from('notifications') as any)
+        .update({ read: true })
+        .eq('id', notificationId);
+    }
+
+    return !res.error;
   } catch (err) {
     return false;
   }
@@ -455,9 +462,15 @@ export const markAllNotificationsAsRead = async (
 
   if (userId && isValidUUID(userId)) {
     try {
-      await (supabase.from('notifications') as any)
-        .update({ is_read: true, read: true })
+      let res = await (supabase.from('notifications') as any)
+        .update({ is_read: true })
         .eq('user_id', userId);
+
+      if (res.error && (res.error.message?.includes('column') || res.error.code === 'PGRST204')) {
+        await (supabase.from('notifications') as any)
+          .update({ read: true })
+          .eq('user_id', userId);
+      }
     } catch (e) {}
   }
 
