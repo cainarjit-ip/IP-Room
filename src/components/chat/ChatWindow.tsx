@@ -17,6 +17,7 @@ import {
   sendTypingIndicator,
   archiveConversation,
 } from '../../services/supabase/chatService';
+import { isValidUUID, stringToUUID } from '../../lib/supabase';
 import { ReportModal } from './ReportModal';
 import { BlockConfirmModal } from './BlockConfirmModal';
 import {
@@ -166,7 +167,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           });
 
           // Mark incoming message as read if we are currently looking at this conversation
-          if (newMsg.sender_id !== currentUser.id) {
+          const safeMyId = isValidUUID(currentUser.id) ? currentUser.id : stringToUUID(currentUser.id);
+          const isSenderMe =
+            newMsg.sender_id === currentUser.id ||
+            newMsg.sender_id === safeMyId ||
+            (newMsg as any).raw_sender_id === currentUser.id;
+
+          if (!isSenderMe) {
             markConversationAsRead(conversation.id, currentUser.id);
           }
 

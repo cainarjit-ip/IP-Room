@@ -450,19 +450,23 @@ export const getUserConversations = async (
 
       // Determine unread count strictly:
       let unreadCount = 0;
+      const unreadFromMsgs = allMsgs.filter((m) => {
+        const isSenderMe =
+          m.sender_id === safeUserId ||
+          m.sender_id === userId ||
+          (m as any).raw_sender_id === userId;
+        return !isSenderMe && !m.is_read;
+      }).length;
+
       const explicitCount = isOwner ? c.owner_unread_count : c.renter_unread_count;
-      if (explicitCount !== undefined && explicitCount !== null) {
+      if (allMsgs.length > 0) {
+        unreadCount = unreadFromMsgs;
+      } else if (explicitCount !== undefined && explicitCount !== null) {
         unreadCount = Math.max(0, Number(explicitCount));
       } else if (c.unread_count !== undefined && c.unread_count !== null) {
         unreadCount = Math.max(0, Number(c.unread_count));
       } else {
-        unreadCount = allMsgs.filter((m) => {
-          const isSenderMe =
-            m.sender_id === safeUserId ||
-            m.sender_id === userId ||
-            (m as any).raw_sender_id === userId;
-          return !isSenderMe && !m.is_read;
-        }).length;
+        unreadCount = unreadFromMsgs;
       }
 
       return {
@@ -505,7 +509,15 @@ export const getConversationMessages = async (
     const remoteData: any[] = (!error && Array.isArray(data)) ? data : [];
     const mergedMap = new Map<string, any>();
     localMsgs.forEach((m) => mergedMap.set(m.id, m));
-    remoteData.forEach((m: any) => mergedMap.set(m.id, { ...mergedMap.get(m.id), ...m }));
+    remoteData.forEach((m: any) => {
+      const local = mergedMap.get(m.id);
+      const isRead = local?.is_read === true || m.is_read === true;
+      mergedMap.set(m.id, {
+        ...local,
+        ...m,
+        is_read: isRead,
+      });
+    });
 
     const combined = Array.from(mergedMap.values()).sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
