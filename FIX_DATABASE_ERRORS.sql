@@ -53,24 +53,34 @@ CREATE INDEX IF NOT EXISTS idx_conversations_room ON public.conversations(room_i
 
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 
+-- Drop insecure public policies
+DROP POLICY IF EXISTS "Public can read conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Public can insert conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Allow authenticated users to create conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Allow authenticated users to view own conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Allow participants to update conversations" ON public.conversations;
+
 DO $$ BEGIN
-  CREATE POLICY "Allow authenticated users to view own conversations"
+  CREATE POLICY "Participants and admin can view conversations"
   ON public.conversations FOR SELECT
-  USING (auth.uid() IS NULL OR auth.uid() = renter_id OR auth.uid() = owner_id);
+  TO authenticated
+  USING (auth.uid() = renter_id OR auth.uid() = owner_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Allow authenticated users to create conversations"
+  CREATE POLICY "Users can start conversations"
   ON public.conversations FOR INSERT
-  WITH CHECK (true);
+  TO authenticated
+  WITH CHECK (auth.uid() = renter_id OR auth.uid() = owner_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Allow participants to update conversations"
+  CREATE POLICY "Participants can update conversations"
   ON public.conversations FOR UPDATE
-  USING (true);
+  TO authenticated
+  USING (auth.uid() = renter_id OR auth.uid() = owner_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -100,24 +110,56 @@ CREATE INDEX IF NOT EXISTS idx_messages_unread ON public.messages(conversation_i
 
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
+-- Drop insecure public policies
+DROP POLICY IF EXISTS "Public can read messages" ON public.messages;
+DROP POLICY IF EXISTS "Public can insert messages" ON public.messages;
+DROP POLICY IF EXISTS "Allow all users to view messages" ON public.messages;
+DROP POLICY IF EXISTS "Allow all users to insert messages" ON public.messages;
+DROP POLICY IF EXISTS "Allow participants to update message read status" ON public.messages;
+
 DO $$ BEGIN
-  CREATE POLICY "Allow all users to view messages"
+  CREATE POLICY "Conversation participants can select messages"
   ON public.messages FOR SELECT
-  USING (true);
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.conversations c
+      WHERE c.id = messages.conversation_id
+      AND (c.renter_id = auth.uid() OR c.owner_id = auth.uid())
+    )
+  );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Allow all users to insert messages"
+  CREATE POLICY "Conversation participants can insert messages"
   ON public.messages FOR INSERT
-  WITH CHECK (true);
+  TO authenticated
+  WITH CHECK (
+    sender_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.conversations c
+      WHERE c.id = messages.conversation_id
+      AND (c.renter_id = auth.uid() OR c.owner_id = auth.uid())
+      AND c.status <> 'blocked'
+    )
+  );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Allow participants to update message read status"
+  CREATE POLICY "Participants can update messages"
   ON public.messages FOR UPDATE
-  USING (true);
+  TO authenticated
+  USING (
+    sender_id = auth.uid()
+    OR receiver_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM public.conversations c
+      WHERE c.id = messages.conversation_id
+      AND (c.renter_id = auth.uid() OR c.owner_id = auth.uid())
+    )
+  );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -172,5 +214,23 @@ CREATE TABLE IF NOT EXISTS public.payments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 7. REFRESH SCHEMA CACHE
+-- 7. FIX ROOMS POLICIES (Drop Anyone can insert rooms)
+DROP POLICY IF EXISTS "Anyone can insert rooms" ON public.rooms;
+DROP POLICY IF EXISTS "Public can insert rooms" ON public.rooms;
+
+DO $$ BEGIN
+  CREATE POLICY "Owners can insert their own rooms"
+  ON public.rooms FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    owner_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role = 'owner'
+    )
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 8. REFRESH SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';
