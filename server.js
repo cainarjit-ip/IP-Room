@@ -60,7 +60,7 @@ app.get('*', (_req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {
-      res.status(200).send('<!DOCTYPE html><html><head><title>IP Room</title></head><body><div id="root"></div></body></html>');
+      res.status(200).send('<!DOCTYPE html><html><head><title>IP ROOM Rent | Nepal\'s Student & Renter Room Marketplace</title></head><body><div id="root"></div></body></html>');
     }
   });
 });
